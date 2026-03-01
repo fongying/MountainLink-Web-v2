@@ -9,13 +9,14 @@ const UNITS = ['登山者', '待救者', '特種搜救隊(NFA SSRT)', '警消', 
 export const load = async ({ locals, params }: { locals: App.Locals; params: { id: string } }) => {
   if (!locals.user) throw redirect(303, '/login');
   if (!locals.user.is_admin) throw redirect(303, '/dashboard');
+  const currentUser = locals.user;
 
   const deviceId = params.id;
   const exists = getMockDevices().some((d) => d.deviceId === deviceId);
   if (!exists) throw redirect(303, '/dashboard');
 
   const users = await listUsers();
-  const otherUsers = users.filter((u) => u.id !== locals.user.id);
+  const otherUsers = users.filter((u) => u.id !== currentUser.id);
 
   return {
     deviceId,

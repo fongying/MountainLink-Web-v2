@@ -1,9 +1,10 @@
-﻿<script lang="ts">
+<script lang="ts">
   import { onMount } from 'svelte';
   import type { DeviceTelemetry, MLinkSseEvent } from '$lib/types';
   import { connectSse } from '$lib/client/sse';
   import GoogleMapView from '$lib/components/GoogleMapView.svelte';
   import GoogleMap3DView from '$lib/components/GoogleMap3DView.svelte';
+  import WeatherAlertPanel from '$lib/components/WeatherAlertPanel.svelte';
   import { goto } from '$app/navigation';
 
   // 地圖模式
@@ -91,6 +92,8 @@
       <p class="heroTime">最後更新：{devices[0]?.updatedAt ? fmtTime(devices[0].updatedAt) : '—'}</p>
     </div>
   </header>
+
+  <WeatherAlertPanel />
 
   <section class="card mapCard">
     <div class="cardHeader">
