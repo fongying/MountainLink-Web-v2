@@ -2,6 +2,8 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { env } from '$env/dynamic/private';
 import { json } from '@sveltejs/kit';
 import { receiveEqTrigger, type TriggerWebhookPayload } from '$lib/server/earthquake';
+import { getUnifiedHazardSnapshot } from '$lib/server/hazards';
+import { broadcastSse } from '$lib/server/stream';
 
 const MAX_SKEW_MS = 60_000;
 
@@ -22,9 +24,7 @@ function verifySignature(rawBody: string, timestamp: string, signature: string, 
   return timingSafeEqual(expected, actual);
 }
 
-export const POST = async ({ request, locals }: any) => {
-  if (!locals?.user) return new Response('Unauthorized', { status: 401 });
-
+export const POST = async ({ request }: any) => {
   const secret = env.MLINK_WEBHOOK_SECRET || '';
   if (!secret) {
     return json({ error: 'Missing MLINK_WEBHOOK_SECRET' }, { status: 503 });
@@ -58,11 +58,16 @@ export const POST = async ({ request, locals }: any) => {
 
   try {
     const result = await receiveEqTrigger(payload);
+    const { snapshot } = await getUnifiedHazardSnapshot({
+      force: true,
+      reason: 'eq_trigger'
+    });
+    broadcastSse('hazard_update', snapshot);
+
     return json({
       ok: true,
-      deduped: result.deduped,
-      triggerId: result.trigger.id,
-      eventId: result.event?.id ?? null
+      id: result.id,
+      isNew: result.isNew
     });
   } catch (error) {
     return json(

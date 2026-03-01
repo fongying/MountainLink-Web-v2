@@ -1,213 +1,70 @@
-<script lang="ts">
-  import { onMount } from 'svelte';
-  import type { ColdAlert, EarthquakeEvent, RainAlert } from '$lib/types';
+﻿<script lang="ts">
+  import type { AlertItem, HazardType, Severity } from '$lib/types/alerts';
 
-  const EQ_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
-  const EQ_MAX_COUNT = 3;
-
-  export let county: string | null = null;
   export let title = '自然災害警示區';
+  export let items: AlertItem[] = [];
+  export let loading = false;
+  export let notice = '';
 
-  type AlertKind = 'RAIN' | 'COLD' | 'EQ';
+  let view: 'all' | HazardType = 'all';
 
-  type AlertItem = {
-    id: string;
-    kind: AlertKind;
-    level: string;
-    title: string;
-    headline: string;
-    areas: string[];
-    issuedAt: number;
-    expiresAt?: number;
-    priority: number;
-    eqIntensity?: number;
-  };
+  $: rainCount = items.filter((x) => x.type === 'rain').length;
+  $: coldCount = items.filter((x) => x.type === 'cold').length;
+  $: eqCount = items.filter((x) => x.type === 'earthquake').length;
+  $: visibleItems = view === 'all' ? items : items.filter((x) => x.type === view);
 
-  let alerts: AlertItem[] = [];
-  let updatedAt: number | null = null;
-  let loading = true;
-  let error = '';
-
-  let rainCount = 0;
-  let coldCount = 0;
-  let eqCount = 0;
-
-  let view: 'ALL' | AlertKind = 'ALL';
-
-  const fmtTime = (ms: number) => new Date(ms).toLocaleString();
-
-  $: visibleAlerts = view === 'ALL' ? alerts : alerts.filter((a) => a.kind === view);
-
-  function buildWeatherUrl(pathname: string) {
-    const url = new URL(pathname, window.location.origin);
-    url.searchParams.set('activeOnly', 'true');
-    url.searchParams.set('includeEnded', 'false');
-    url.searchParams.set('limit', '50');
-    if (county) url.searchParams.set('county', county);
-    return `${url.pathname}${url.search}`;
-  }
-
-  function rainPriority(level: string) {
-    if (level.includes('超大豪雨')) return 44;
-    if (level.includes('大豪雨')) return 43;
-    if (level.includes('豪雨')) return 42;
-    if (level.includes('大雨')) return 41;
-    return 40;
-  }
-
-  function coldPriority(level: string) {
-    if (level.includes('紅色')) return 34;
-    if (level.includes('橙色')) return 33;
-    if (level.includes('黃色')) return 32;
-    return 31;
-  }
-
-  function eqPriority(eq: EarthquakeEvent) {
-    const intensity = eq.maxIntensity ?? 0;
-    return 45 + intensity * 2 + (eq.hasReport ? 2 : 0);
-  }
-
-  function levelClass(item: AlertItem) {
-    if (item.kind === 'RAIN') {
-      if (item.level.includes('超大豪雨')) return 'lv-rain-red';
-      if (item.level.includes('大豪雨')) return 'lv-rain-orange';
-      if (item.level.includes('豪雨')) return 'lv-rain-gold';
-      return 'lv-rain-yellow';
-    }
-
-    if (item.kind === 'COLD') {
-      if (item.level.includes('紅色')) return 'lv-cold-red';
-      if (item.level.includes('橙色')) return 'lv-cold-orange';
-      if (item.level.includes('黃色')) return 'lv-cold-yellow';
-      return 'lv-cold-blue';
-    }
-
-    if ((item.eqIntensity ?? 0) >= 5) return 'lv-eq-high';
-    if ((item.eqIntensity ?? 0) >= 3) return 'lv-eq-mid';
-    return 'lv-eq-low';
-  }
-
-  function kindClass(kind: AlertKind) {
-    if (kind === 'RAIN') return 'kind-rain';
-    if (kind === 'COLD') return 'kind-cold';
-    return 'kind-eq';
-  }
-
-  function kindLabel(kind: AlertKind) {
-    if (kind === 'RAIN') return '豪雨';
-    if (kind === 'COLD') return '低溫';
+  function typeLabel(type: HazardType) {
+    if (type === 'rain') return '豪雨';
+    if (type === 'cold') return '低溫';
     return '地震';
   }
 
-  function toEqAlerts(events: EarthquakeEvent[]): AlertItem[] {
-    const cutoff = Date.now() - EQ_WINDOW_MS;
-
-    return events
-      .filter((e) => (e.originTime ?? e.firstSeenAt ?? 0) >= cutoff)
-      .sort(
-        (a, b) =>
-          b.severityScore - a.severityScore ||
-          (b.originTime ?? b.firstSeenAt ?? 0) - (a.originTime ?? a.firstSeenAt ?? 0)
-      )
-      .slice(0, EQ_MAX_COUNT)
-      .map<AlertItem>((e) => ({
-        id: e.id,
-        kind: 'EQ',
-        level: e.maxIntensity != null ? `最大震度 ${e.maxIntensity}` : '地震通知',
-        title: e.title,
-        headline: e.summary,
-        areas: Object.keys(e.intensityByCounty ?? {}).slice(0, 8),
-        issuedAt: e.originTime ?? e.firstSeenAt,
-        priority: eqPriority(e),
-        eqIntensity: e.maxIntensity
-      }));
+  function typeIcon(type: HazardType) {
+    if (type === 'rain') return '🌧️';
+    if (type === 'cold') return '🥶';
+    return '🌎';
   }
 
-  async function loadAlerts() {
-    try {
-      error = '';
-
-      const [rainRes, coldRes, eqRes] = await Promise.all([
-        fetch(buildWeatherUrl('/api/alerts/rain'), { method: 'GET' }),
-        fetch(buildWeatherUrl('/api/alerts/cold'), { method: 'GET' }),
-        fetch('/api/eq/events?limit=30', { method: 'GET' })
-      ]);
-
-      if (!rainRes.ok || !coldRes.ok || !eqRes.ok) {
-        throw new Error(`rain=${rainRes.status}, cold=${coldRes.status}, eq=${eqRes.status}`);
-      }
-
-      const rainJson = (await rainRes.json()) as { updatedAt: number; alerts: RainAlert[] };
-      const coldJson = (await coldRes.json()) as { updatedAt: number; alerts: ColdAlert[] };
-      const eqJson = (await eqRes.json()) as { updatedAt: number; events: EarthquakeEvent[] };
-
-      const rainAlerts = (rainJson.alerts ?? []).map<AlertItem>((a) => ({
-        id: a.id,
-        kind: 'RAIN',
-        level: a.level,
-        title: a.title,
-        headline: a.headline,
-        areas: a.areas,
-        issuedAt: a.issuedAt,
-        expiresAt: a.expiresAt,
-        priority: rainPriority(a.level)
-      }));
-
-      const coldAlerts = (coldJson.alerts ?? []).map<AlertItem>((a) => ({
-        id: a.id,
-        kind: 'COLD',
-        level: a.level,
-        title: a.title,
-        headline: a.headline,
-        areas: a.counties.length ? a.counties : a.areas,
-        issuedAt: a.issuedAt,
-        expiresAt: a.expiresAt,
-        priority: coldPriority(a.level)
-      }));
-
-      const eqAlerts = toEqAlerts(eqJson.events ?? []);
-
-      rainCount = rainAlerts.length;
-      coldCount = coldAlerts.length;
-      eqCount = eqAlerts.length;
-
-      alerts = [...rainAlerts, ...coldAlerts, ...eqAlerts].sort(
-        (a, b) => b.priority - a.priority || b.issuedAt - a.issuedAt
-      );
-
-      updatedAt = Math.max(rainJson.updatedAt || 0, coldJson.updatedAt || 0, eqJson.updatedAt || 0, Date.now());
-    } catch (e) {
-      error = `警報資料載入失敗：${e instanceof Error ? e.message : 'unknown error'}`;
-    } finally {
-      loading = false;
-    }
+  function severityLabel(severity: Severity) {
+    if (severity === 'critical') return '重大';
+    if (severity === 'warning') return '警戒';
+    if (severity === 'watch') return '注意';
+    return '資訊';
   }
 
-  onMount(() => {
-    void loadAlerts();
-    const timer = setInterval(() => void loadAlerts(), 60_000);
-    return () => clearInterval(timer);
-  });
+  function severityClass(severity: Severity) {
+    if (severity === 'critical') return 'sev-critical';
+    if (severity === 'warning') return 'sev-warning';
+    if (severity === 'watch') return 'sev-watch';
+    return 'sev-info';
+  }
+
+  function fmtTime(v?: string) {
+    if (!v) return '—';
+    const t = Date.parse(v);
+    if (!Number.isFinite(t)) return '—';
+    return new Date(t).toLocaleString();
+  }
 </script>
 
-<section class="card alertCenter">
+<section class="card hazardCard">
   <div class="cardHeader">
     <div>
       <h2>{title}</h2>
-      <p class="muted">整合豪雨、低溫、地震；地震僅顯示近 3 天最多 3 則</p>
+      <p class="muted">同一清單顯示雨、低溫、地震；地震只保留近 3 天最多 3 筆</p>
     </div>
     <div class="meta">
-      <div class="segment" role="group" aria-label="Alert type filter">
-        <button class={`seg ${view === 'ALL' ? 'seg-active' : ''}`} type="button" on:click={() => (view = 'ALL')} aria-pressed={view === 'ALL'}>
+      <div class="segment" role="group" aria-label="Hazard filter">
+        <button class={`seg ${view === 'all' ? 'seg-active' : ''}`} type="button" on:click={() => (view = 'all')} aria-pressed={view === 'all'}>
           全部
         </button>
-        <button class={`seg ${view === 'RAIN' ? 'seg-active' : ''}`} type="button" on:click={() => (view = 'RAIN')} aria-pressed={view === 'RAIN'}>
+        <button class={`seg ${view === 'rain' ? 'seg-active' : ''}`} type="button" on:click={() => (view = 'rain')} aria-pressed={view === 'rain'}>
           豪雨
         </button>
-        <button class={`seg ${view === 'COLD' ? 'seg-active' : ''}`} type="button" on:click={() => (view = 'COLD')} aria-pressed={view === 'COLD'}>
+        <button class={`seg ${view === 'cold' ? 'seg-active' : ''}`} type="button" on:click={() => (view = 'cold')} aria-pressed={view === 'cold'}>
           低溫
         </button>
-        <button class={`seg ${view === 'EQ' ? 'seg-active' : ''}`} type="button" on:click={() => (view = 'EQ')} aria-pressed={view === 'EQ'}>
+        <button class={`seg ${view === 'earthquake' ? 'seg-active' : ''}`} type="button" on:click={() => (view = 'earthquake')} aria-pressed={view === 'earthquake'}>
           地震
         </button>
       </div>
@@ -217,41 +74,33 @@
         <span class="chip chip-cold">低溫 {coldCount}</span>
         <span class="chip chip-eq">地震 {eqCount}</span>
       </div>
-
-      {#if updatedAt}
-        <span>更新：{fmtTime(updatedAt)}</span>
-      {/if}
-      {#if county}
-        <span class="county">{county}</span>
-      {/if}
     </div>
   </div>
 
-  {#if error}
-    <p class="error">{error}</p>
-  {:else if loading && visibleAlerts.length === 0}
+  {#if notice}
+    <p class="notice">{notice}</p>
+  {/if}
+
+  {#if loading && visibleItems.length === 0}
     <p class="empty">資料載入中...</p>
-  {:else if visibleAlerts.length === 0}
-    <p class="empty">目前沒有符合條件的告警</p>
+  {:else if visibleItems.length === 0}
+    <p class="empty">近 3 天無災害警示</p>
   {:else}
     <div class="alerts">
-      {#each visibleAlerts as a (a.kind + ':' + a.id)}
+      {#each visibleItems as item (item.id)}
         <article class="alert">
           <div class="alertTop">
             <div class="left">
-              <span class={`kind ${kindClass(a.kind)}`}>{kindLabel(a.kind)}</span>
-              <span class={`badge ${levelClass(a)}`}>{a.level}</span>
+              <span class="kind">{typeIcon(item.type)} {typeLabel(item.type)}</span>
+              <span class={`severity ${severityClass(item.severity)}`}>{severityLabel(item.severity)}</span>
             </div>
-            <span class="issued">{fmtTime(a.issuedAt)}</span>
+            <span class="time">{fmtTime(item.eventAt ?? item.issuedAt)}</span>
           </div>
 
-          <h3>{a.title}</h3>
-          <p class="headline">{a.headline}</p>
-          {#if a.areas.length > 0}
-            <p class="areas">{a.areas.join('、')}</p>
-          {/if}
-          {#if a.expiresAt}
-            <p class="expires">到期：{fmtTime(a.expiresAt)}</p>
+          <h3>{item.title}</h3>
+          <p class="summary">{item.summary}</p>
+          {#if item.region}
+            <p class="region">影響區域：{item.region}</p>
           {/if}
         </article>
       {/each}
@@ -260,7 +109,7 @@
 </section>
 
 <style>
-  .alertCenter {
+  .hazardCard {
     margin-top: 16px;
   }
 
@@ -362,11 +211,13 @@
     background: rgba(239, 68, 68, 0.16);
   }
 
-  .county {
-    padding: 2px 8px;
-    border-radius: 999px;
-    border: 1px solid rgba(12, 40, 46, 0.18);
-    background: rgba(255, 255, 255, 0.7);
+  .notice {
+    margin: 0 0 10px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    background: rgba(245, 158, 11, 0.16);
+    color: #854d0e;
+    font-size: 12px;
   }
 
   .alerts {
@@ -400,120 +251,63 @@
   .kind {
     display: inline-flex;
     align-items: center;
-    border-radius: 999px;
-    border: 1px solid transparent;
     padding: 2px 8px;
+    border-radius: 999px;
     font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.02em;
+    color: #2b3a3c;
+    border: 1px solid rgba(12, 40, 46, 0.12);
+    background: rgba(255, 255, 255, 0.8);
   }
 
-  .kind-rain {
-    color: #7c2d12;
-    border-color: #fbbf24;
-    background: rgba(251, 191, 36, 0.12);
-  }
-
-  .kind-cold {
-    color: #1e3a8a;
-    border-color: #93c5fd;
-    background: rgba(147, 197, 253, 0.12);
-  }
-
-  .kind-eq {
-    color: #7f1d1d;
-    border-color: #fca5a5;
-    background: rgba(252, 165, 165, 0.14);
-  }
-
-  .badge {
+  .severity {
     display: inline-flex;
     align-items: center;
-    padding: 3px 8px;
+    padding: 2px 8px;
     border-radius: 999px;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 700;
     border: 1px solid transparent;
   }
 
-  .lv-rain-red {
+  .sev-critical {
     color: #7f1d1d;
     border-color: #ef4444;
     background: rgba(239, 68, 68, 0.16);
   }
 
-  .lv-rain-orange {
+  .sev-warning {
     color: #9a3412;
     border-color: #f97316;
     background: rgba(249, 115, 22, 0.16);
   }
 
-  .lv-rain-gold {
+  .sev-watch {
     color: #854d0e;
     border-color: #f59e0b;
     background: rgba(245, 158, 11, 0.16);
   }
 
-  .lv-rain-yellow {
-    color: #7c2d12;
-    border-color: #fbbf24;
-    background: rgba(251, 191, 36, 0.16);
-  }
-
-  .lv-cold-red {
-    color: #7f1d1d;
-    border-color: #ef4444;
-    background: rgba(239, 68, 68, 0.16);
-  }
-
-  .lv-cold-orange {
-    color: #9a3412;
-    border-color: #f97316;
-    background: rgba(249, 115, 22, 0.16);
-  }
-
-  .lv-cold-yellow {
-    color: #854d0e;
-    border-color: #f59e0b;
-    background: rgba(245, 158, 11, 0.16);
-  }
-
-  .lv-cold-blue {
+  .sev-info {
     color: #1e3a8a;
     border-color: #60a5fa;
     background: rgba(96, 165, 250, 0.16);
   }
 
-  .lv-eq-high {
-    color: #7f1d1d;
-    border-color: #ef4444;
-    background: rgba(239, 68, 68, 0.16);
-  }
-
-  .lv-eq-mid {
-    color: #9a3412;
-    border-color: #f97316;
-    background: rgba(249, 115, 22, 0.16);
-  }
-
-  .lv-eq-low {
-    color: #0b1b1e;
-    border-color: rgba(12, 40, 46, 0.22);
-    background: rgba(12, 40, 46, 0.08);
-  }
-
-  .issued,
-  .expires {
+  .time {
     font-size: 12px;
     color: #53656a;
-    margin: 0;
   }
 
-  .headline,
-  .areas {
+  .summary,
+  .region {
     margin: 0;
     font-size: 13px;
     color: #53656a;
+    display: -webkit-box;
+    line-clamp: 2;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
 
   .empty {
@@ -522,14 +316,6 @@
     border-radius: 12px;
     background: rgba(12, 40, 46, 0.06);
     color: #53656a;
-  }
-
-  .error {
-    margin: 0;
-    padding: 12px;
-    border-radius: 12px;
-    background: rgba(239, 68, 68, 0.12);
-    color: #991b1b;
   }
 
   @media (max-width: 720px) {

@@ -1,9 +1,40 @@
-// src/routes/api/stream/+server.ts
-import { getMockDevices } from '$lib/server/mock';
+﻿import { getMockDevices } from '$lib/server/mock';
 import { listDeviceUnits } from '$lib/server/device-units';
+import { getUnifiedHazardSnapshot, shouldRefreshUnifiedHazards } from '$lib/server/hazards';
+import {
+  broadcastSse,
+  getSseClientCount,
+  registerSseClient,
+  unregisterSseClient
+} from '$lib/server/stream';
+
+let hazardRefreshTimer: ReturnType<typeof setInterval> | null = null;
+let refreshingHazards = false;
+
+function ensureHazardRefreshLoop() {
+  if (hazardRefreshTimer) return;
+
+  hazardRefreshTimer = setInterval(async () => {
+    if (refreshingHazards || getSseClientCount() === 0) return;
+    if (!shouldRefreshUnifiedHazards()) return;
+    refreshingHazards = true;
+    try {
+      const { snapshot, changed } = await getUnifiedHazardSnapshot({
+        force: false,
+        reason: 'hazard_refresh'
+      });
+      if (changed) {
+        broadcastSse('hazard_update', snapshot);
+      }
+    } catch {
+      // ignore refresh errors in background loop
+    } finally {
+      refreshingHazards = false;
+    }
+  }, 60_000);
+}
 
 export const GET = async ({ request, locals }: any) => {
-  // ✅ 需要登入才允許連 SSE（避免被外部直接打）
   if (!locals?.user) {
     return new Response('Unauthorized', { status: 401 });
   }
@@ -22,13 +53,22 @@ export const GET = async ({ request, locals }: any) => {
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       const encoder = new TextEncoder();
+      const sendRaw = (chunk: string) => controller.enqueue(encoder.encode(chunk));
+      const sseClient = registerSseClient(sendRaw);
 
-      const send = (payload: unknown, event?: string) => {
-        const evt = event ? `event: ${event}\n` : '';
-        controller.enqueue(encoder.encode(`${evt}data: ${JSON.stringify(payload)}\n\n`));
-      };
+      ensureHazardRefreshLoop();
 
-      controller.enqueue(encoder.encode(`: connected\n\n`));
+      sseClient.comment('connected');
+      sseClient.send('hello', { connectedAt: new Date().toISOString() });
+
+      void (async () => {
+        try {
+          const { snapshot } = await getUnifiedHazardSnapshot({ reason: 'stream_connect' });
+          sseClient.send('hazard_update', snapshot);
+        } catch {
+          // ignore initial snapshot errors
+        }
+      })();
 
       let devices = getMockDevices().map((d) => ({
         ...d,
@@ -38,7 +78,6 @@ export const GET = async ({ request, locals }: any) => {
       const timer = setInterval(() => {
         const now = Date.now();
 
-        // 先更新所有裝置狀態（mock）
         devices = devices.map((d) => {
           if (!d.online) return d;
 
@@ -51,21 +90,21 @@ export const GET = async ({ request, locals }: any) => {
           return { ...d, hr, battery, lat, lon, sos, updatedAt: now, unit: units.get(d.deviceId) };
         });
 
-        // ✅ 若有 deviceIdFilter，就只送那台；否則送全部
         const filtered = deviceIdFilter
           ? devices.filter((d) => d.deviceId === deviceIdFilter)
           : devices;
 
-        send({ type: 'telemetry', devices: filtered }, 'telemetry');
+        sseClient.send('telemetry', { type: 'telemetry', devices: filtered });
       }, 1000);
 
       const heartbeat = setInterval(() => {
-        controller.enqueue(encoder.encode(`: ping\n\n`));
+        sseClient.comment('ping');
       }, 15000);
 
       const cleanup = () => {
         clearInterval(timer);
         clearInterval(heartbeat);
+        unregisterSseClient(sseClient.id);
         try {
           controller.close();
         } catch {

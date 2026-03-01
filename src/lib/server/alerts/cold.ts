@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { ColdAlert, ColdLevel } from '$lib/types';
 import { fetchCwaDatastore } from '$lib/server/cwa';
+import { CWA_COLD_TTL_MS } from '$lib/server/alerts/cache-config';
 
 const DATASET_ID = 'W-C0033-004';
 
@@ -29,6 +30,14 @@ type CwaColdResponse = {
     info?: CwaInfo[];
   };
 };
+
+type ColdSnapshot = {
+  at: number;
+  data: ColdAlert[];
+};
+
+let coldSnapshot: ColdSnapshot | null = null;
+let coldInFlight: Promise<ColdAlert[]> | null = null;
 
 function parseTs(v?: string): number | undefined {
   if (!v) return undefined;
@@ -128,4 +137,32 @@ export async function fetchColdAlerts(options?: {
   }
 
   return alerts;
+}
+
+export function isColdCacheExpired(now = Date.now()) {
+  return !coldSnapshot || now - coldSnapshot.at >= CWA_COLD_TTL_MS;
+}
+
+export async function getColdAlertsCached() {
+  if (!isColdCacheExpired() && coldSnapshot) {
+    return coldSnapshot.data.slice();
+  }
+
+  if (coldInFlight) {
+    const data = await coldInFlight;
+    return data.slice();
+  }
+
+  coldInFlight = (async () => {
+    const data = await fetchColdAlerts();
+    coldSnapshot = { at: Date.now(), data };
+    return data;
+  })();
+
+  try {
+    const data = await coldInFlight;
+    return data.slice();
+  } finally {
+    coldInFlight = null;
+  }
 }

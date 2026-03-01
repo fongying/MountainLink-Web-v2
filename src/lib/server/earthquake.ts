@@ -1,14 +1,13 @@
-import { randomUUID } from 'node:crypto';
-import type { EarthquakeEvent, EqReport, EqTrigger } from '$lib/types';
+import { createHash } from 'node:crypto';
+import type { EarthquakeEvent, EqReport } from '$lib/types';
 import { fetchCwaDatastore } from '$lib/server/cwa';
+import { db } from '$lib/server/db';
 
 const DATASET_ID = 'E-A0015-001';
 const POLL_INTERVAL_MS = 90_000;
-const MATCH_WINDOW_MS = 5 * 60_000;
-const TRIGGER_DEDUP_BUCKET_MS = 10_000;
-const MAX_REPORTS = 400;
-const MAX_TRIGGERS = 1_500;
-const MAX_EVENTS = 500;
+const EVENTS_WINDOW_MS = 72 * 60 * 60 * 1000;
+const EVENTS_LIMIT = 3;
+const RETENTION_DAYS = 7;
 
 type RawResponse = {
   records?: {
@@ -18,10 +17,6 @@ type RawResponse = {
 
 type RawEarthquake = {
   EarthquakeNo?: number | string;
-  ReportContent?: string;
-  Web?: string;
-  ReportImageURI?: string;
-  ShakemapImageURI?: string;
   EarthquakeInfo?: {
     OriginTime?: string;
     FocalDepth?: number | string;
@@ -34,55 +29,84 @@ type RawEarthquake = {
       MagnitudeValue?: number | string;
     };
   };
-  Intensity?: {
-    ShakingArea?: RawShakingArea[];
-  };
 };
 
-type RawShakingArea = {
-  CountyName?: string;
-  InfoStatus?: string;
-  AreaIntensity?: string;
+type DbEventRow = {
+  id: string;
+  origin_time: string;
+  magnitude: number | null;
+  depth_km: number | null;
+  lat: number | null;
+  lon: number | null;
+  location: string | null;
+  source: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type EarthquakeUpsertInput = {
+  id?: string;
+  originTime: string;
+  magnitude?: number;
+  depthKm?: number;
+  lat?: number;
+  lon?: number;
+  location?: string;
+  source?: string;
+};
+
+type TriggerWebhookLocation = {
+  county?: string;
+  town?: string;
 };
 
 export type TriggerWebhookPayload = {
-  source?: 'EQ_WAKEUP' | 'OTHER_APP' | string;
+  id?: string;
+  eventId?: string;
+  earthquakeNo?: string | number;
+  originTime?: string | number;
   triggeredAt?: number;
-  site?: { county?: string; town?: string };
+  magnitude?: number;
+  depthKm?: number;
+  lat?: number;
+  lon?: number;
+  location?: string;
+  source?: 'EQ_WAKEUP' | 'OTHER_APP' | string;
+  site?: TriggerWebhookLocation;
   thresholdIntensity?: number;
   estimatedIntensity?: number;
   raw?: unknown;
 };
 
-const state = {
-  lastPolledAt: 0,
-  pollingPromise: null as Promise<void> | null,
+let schemaReadyPromise: Promise<void> | null = null;
+let pollingPromise: Promise<void> | null = null;
+let lastPolledAt = 0;
 
-  reportsById: new Map<string, EqReport>(),
-  triggersById: new Map<string, EqTrigger>(),
-  eventsById: new Map<string, EarthquakeEvent>(),
-
-  reportToEventId: new Map<string, string>(),
-  triggerToEventId: new Map<string, string>(),
-  triggerDedupIdByKey: new Map<string, string>()
-};
-
-function normalizeCountyName(v: string): string {
-  const trimmed = v.trim();
-  if (!trimmed) return '';
-  return trimmed.startsWith('台') ? `臺${trimmed.slice(1)}` : trimmed;
+function run(sql: string, params: unknown[] = []) {
+  return new Promise<void>((resolve, reject) => {
+    db.run(sql, params, (err) => (err ? reject(err) : resolve()));
+  });
 }
 
-function splitCountyNames(v?: string): string[] {
-  if (!v) return [];
-  return Array.from(
-    new Set(
-      v
-        .split(/[、,，/]/)
-        .map((x) => normalizeCountyName(x))
-        .filter(Boolean)
-    )
-  );
+function runWithChanges(sql: string, params: unknown[] = []) {
+  return new Promise<number>((resolve, reject) => {
+    db.run(sql, params, function (err) {
+      if (err) return reject(err);
+      resolve(this?.changes ?? 0);
+    });
+  });
+}
+
+function getOne<T>(sql: string, params: unknown[] = []) {
+  return new Promise<T | undefined>((resolve, reject) => {
+    db.get(sql, params, (err, row) => (err ? reject(err) : resolve(row as T | undefined)));
+  });
+}
+
+function getAll<T>(sql: string, params: unknown[] = []) {
+  return new Promise<T[]>((resolve, reject) => {
+    db.all(sql, params, (err, rows) => (err ? reject(err) : resolve(rows as T[])));
+  });
 }
 
 function parseNumber(v: unknown): number | undefined {
@@ -94,213 +118,101 @@ function parseNumber(v: unknown): number | undefined {
   return undefined;
 }
 
-function parseIntensity(v?: string): number | undefined {
-  if (!v) return undefined;
-  const m = v.match(/[1-7]/);
-  return m ? Number(m[0]) : undefined;
-}
-
 function parseOriginTime(v?: string): number | undefined {
   if (!v) return undefined;
   const raw = v.trim();
   if (!raw) return undefined;
-
   const hasZone = /([zZ]|[+\-]\d{2}:\d{2})$/.test(raw);
   const normalized = hasZone ? raw : `${raw}+08:00`;
-  const n = Date.parse(normalized);
+  const ts = Date.parse(normalized);
+  return Number.isFinite(ts) ? ts : undefined;
+}
+
+function normalizeCountyName(v: string): string {
+  const trimmed = v.trim();
+  if (!trimmed) return '';
+  return trimmed.startsWith('台') ? `臺${trimmed.slice(1)}` : trimmed;
+}
+
+function toIsoTime(v: unknown): string | undefined {
+  if (typeof v === 'number' && Number.isFinite(v)) return new Date(v).toISOString();
+  if (typeof v === 'string' && v.trim()) {
+    const ts = Date.parse(v);
+    if (Number.isFinite(ts)) return new Date(ts).toISOString();
+    const withZone = Date.parse(`${v.trim()}+08:00`);
+    if (Number.isFinite(withZone)) return new Date(withZone).toISOString();
+  }
+  return undefined;
+}
+
+function toFinite(v: unknown): number | undefined {
+  const n = Number(v);
   return Number.isFinite(n) ? n : undefined;
 }
 
-function toIntensityByCounty(areas: RawShakingArea[] = []): Record<string, number> {
-  const byCounty: Record<string, number> = {};
-  const observe = areas.filter((a) => (a.InfoStatus || '').toLowerCase() === 'observe');
-  const others = areas.filter((a) => (a.InfoStatus || '').toLowerCase() !== 'observe');
-
-  const apply = (area: RawShakingArea, fillOnly = false) => {
-    const intensity = parseIntensity(area.AreaIntensity);
-    if (intensity == null) return;
-
-    for (const county of splitCountyNames(area.CountyName)) {
-      if (fillOnly && byCounty[county] != null) continue;
-      byCounty[county] = Math.max(byCounty[county] ?? 0, intensity);
-    }
-  };
-
-  observe.forEach((a) => apply(a, false));
-  others.forEach((a) => apply(a, true));
-
-  return byCounty;
+function deterministicId(parts: Array<string | number | undefined>) {
+  const base = parts.map((p) => String(p ?? '')).join('|');
+  return createHash('sha1').update(base).digest('hex');
 }
 
-function maxIntensity(byCounty: Record<string, number>): number | undefined {
-  const values = Object.values(byCounty).filter((v) => Number.isFinite(v));
-  if (!values.length) return undefined;
-  return Math.max(...values);
-}
-
-function buildReportSummary(byCounty: Record<string, number>): string {
-  const entries = Object.entries(byCounty).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'zh-Hant'));
-  if (!entries.length) return '尚無震度分布資料';
-
-  const top = entries.slice(0, 6).map(([county, intensity]) => `${county}${intensity}級`);
-  if (entries.length > top.length) top.push(`等${entries.length}縣市`);
-  return top.join('，');
-}
-
-function reportSeverity(report: EqReport, triggerCount: number): number {
-  return (report.maxIntensity ?? 0) * 100 + (report.magnitude ?? 0) * 10 + (triggerCount > 0 ? 5 : 0);
-}
-
-function triggerSeverity(trigger: EqTrigger): number {
-  return (trigger.estimatedIntensity ?? trigger.thresholdIntensity) * 100 + trigger.thresholdIntensity * 3;
-}
-
-function buildReportEvent(report: EqReport, triggerIds: string[]): EarthquakeEvent {
-  const summary = buildReportSummary(report.intensityByCounty);
-  const maxI = report.maxIntensity ?? 0;
+function eventFromRow(row: DbEventRow): EarthquakeEvent {
+  const originTs = Date.parse(row.origin_time);
+  const createdTs = Date.parse(row.created_at);
+  const magnitude = row.magnitude ?? undefined;
+  const location = (row.location || '').trim();
   const magnitudeText =
-    report.magnitude != null && Number.isFinite(report.magnitude) ? `M${report.magnitude.toFixed(1)}` : '地震';
-
-  const firstSeenAt = Math.min(
-    report.originTime,
-    ...triggerIds
-      .map((id) => state.triggersById.get(id)?.triggeredAt)
-      .filter((v): v is number => typeof v === 'number')
-  );
+    magnitude != null && Number.isFinite(magnitude) ? `M${magnitude.toFixed(1)}` : '地震通知';
+  const depthText = row.depth_km != null ? `，深度 ${row.depth_km} km` : '';
 
   return {
-    id: report.id,
+    id: row.id,
     kind: 'EARTHQUAKE',
-    hasReport: true,
-    hasTrigger: triggerIds.length > 0,
-    reportId: report.id,
-    triggerIds: triggerIds.slice(),
-    firstSeenAt,
-    originTime: report.originTime,
-    reportedAt: report.issuedAt,
-    magnitude: report.magnitude,
-    depthKm: report.depthKm,
-    epicenterLat: report.epicenter.lat,
-    epicenterLon: report.epicenter.lon,
-    epicenterText: report.epicenter.locationText,
-    maxIntensity: maxI || undefined,
-    intensityByCounty: { ...report.intensityByCounty },
-    title: `${magnitudeText} ${report.epicenter.locationText || '未知震央'}（最大震度${maxI || '-'}）`,
-    summary,
-    severityScore: reportSeverity(report, triggerIds.length),
-    raw: {
-      report: report.raw,
-      triggerIds
-    }
+    hasReport: row.source === 'CWA',
+    hasTrigger: row.source !== 'CWA',
+    reportId: row.source === 'CWA' ? row.id : undefined,
+    triggerIds: [],
+    firstSeenAt: Number.isFinite(createdTs) ? createdTs : Date.now(),
+    originTime: Number.isFinite(originTs) ? originTs : undefined,
+    reportedAt: Number.isFinite(Date.parse(row.updated_at)) ? Date.parse(row.updated_at) : undefined,
+    magnitude,
+    depthKm: row.depth_km ?? undefined,
+    epicenterLat: row.lat ?? undefined,
+    epicenterLon: row.lon ?? undefined,
+    epicenterText: location || undefined,
+    maxIntensity: undefined,
+    intensityByCounty: undefined,
+    title: `${magnitudeText} ${location || '未知位置'}`,
+    summary: `${location || '未知位置'}${depthText}` || '地震事件',
+    severityScore: (magnitude ?? 0) * 100 + (row.source === 'CWA' ? 10 : 0),
+    raw: undefined
   };
 }
 
-function buildTriggerOnlyEvent(trigger: EqTrigger): EarthquakeEvent {
-  const area = `${trigger.site.county}${trigger.site.town ? ` ${trigger.site.town}` : ''}`;
-  const estimated =
-    trigger.estimatedIntensity != null ? `，估計震度 ${trigger.estimatedIntensity}` : '';
-  return {
-    id: `trigger:${trigger.id}`,
-    kind: 'EARTHQUAKE',
-    hasReport: false,
-    hasTrigger: true,
-    triggerIds: [trigger.id],
-    firstSeenAt: trigger.receivedAt,
-    title: `地震觸發 ${area}`,
-    summary: `來源 ${trigger.source}，門檻震度 ${trigger.thresholdIntensity}${estimated}`,
-    severityScore: triggerSeverity(trigger),
-    raw: { trigger }
-  };
-}
-
-function pickBestReportForTrigger(trigger: EqTrigger): EqReport | null {
-  const county = normalizeCountyName(trigger.site.county);
-  let winner: EqReport | null = null;
-  let bestDelta = Number.MAX_SAFE_INTEGER;
-
-  for (const report of state.reportsById.values()) {
-    const intensity = report.intensityByCounty[county];
-    if (intensity == null || intensity < 1) continue;
-
-    const delta = Math.abs(report.originTime - trigger.triggeredAt);
-    if (delta > MATCH_WINDOW_MS) continue;
-
-    if (delta < bestDelta) {
-      bestDelta = delta;
-      winner = report;
-    }
+function triggerLocation(payload: TriggerWebhookPayload): string {
+  if (typeof payload.location === 'string' && payload.location.trim()) {
+    return payload.location.trim();
   }
 
-  return winner;
+  const county = normalizeCountyName(payload.site?.county || '');
+  const town = (payload.site?.town || '').trim();
+  return `${county}${town ? ` ${town}` : ''}`.trim();
 }
 
-function findMatchingTriggersForReport(report: EqReport): string[] {
-  const triggerIds: string[] = [];
-  const counties = new Set(Object.keys(report.intensityByCounty));
+function triggerEventId(payload: TriggerWebhookPayload, originTimeIso: string, location: string): string {
+  if (payload.id) return String(payload.id);
+  if (payload.eventId) return String(payload.eventId);
+  if (payload.earthquakeNo != null) return String(payload.earthquakeNo);
 
-  for (const trigger of state.triggersById.values()) {
-    const county = normalizeCountyName(trigger.site.county);
-    if (!counties.has(county)) continue;
-    if (Math.abs(trigger.triggeredAt - report.originTime) > MATCH_WINDOW_MS) continue;
-    triggerIds.push(trigger.id);
-  }
-
-  return triggerIds;
-}
-
-function upsertReportEvent(report: EqReport, triggerIds: string[]) {
-  const event = buildReportEvent(report, triggerIds);
-  state.eventsById.set(event.id, event);
-  state.reportToEventId.set(report.id, event.id);
-
-  for (const triggerId of triggerIds) {
-    const previous = state.triggerToEventId.get(triggerId);
-    if (previous && previous.startsWith('trigger:')) {
-      state.eventsById.delete(previous);
-    }
-    state.triggerToEventId.set(triggerId, event.id);
-  }
-}
-
-function upsertReport(report: EqReport) {
-  const previous = state.reportsById.get(report.id);
-  const merged = previous ? { ...previous, ...report } : report;
-  state.reportsById.set(report.id, merged);
-
-  const triggerIds = findMatchingTriggersForReport(merged);
-  upsertReportEvent(merged, triggerIds);
-}
-
-function upsertTriggerOnlyEvent(trigger: EqTrigger) {
-  const event = buildTriggerOnlyEvent(trigger);
-  state.eventsById.set(event.id, event);
-  state.triggerToEventId.set(trigger.id, event.id);
-}
-
-function dedupKey(source: string, county: string, town: string, thresholdIntensity: number, triggeredAt: number) {
-  const bucket = Math.floor(triggeredAt / TRIGGER_DEDUP_BUCKET_MS);
-  return `${source}|${county}|${town}|${thresholdIntensity}|${bucket}`;
-}
-
-function prune() {
-  const reportIds = Array.from(state.reportsById.keys()).sort((a, b) => Number(b) - Number(a));
-  for (const id of reportIds.slice(MAX_REPORTS)) {
-    state.reportsById.delete(id);
-    state.reportToEventId.delete(id);
-  }
-
-  const triggers = Array.from(state.triggersById.values()).sort((a, b) => b.triggeredAt - a.triggeredAt);
-  for (const trigger of triggers.slice(MAX_TRIGGERS)) {
-    state.triggersById.delete(trigger.id);
-    state.triggerToEventId.delete(trigger.id);
-  }
-
-  const events = Array.from(state.eventsById.values()).sort(
-    (a, b) => b.severityScore - a.severityScore || b.firstSeenAt - a.firstSeenAt
-  );
-  for (const event of events.slice(MAX_EVENTS)) {
-    state.eventsById.delete(event.id);
-  }
+  const originTs = Date.parse(originTimeIso);
+  const bucket = Math.floor(originTs / 10_000);
+  return deterministicId([
+    'TRIGGER',
+    payload.source || 'OTHER_APP',
+    location,
+    payload.thresholdIntensity,
+    payload.estimatedIntensity,
+    bucket
+  ]);
 }
 
 export function parseEqReportEA0015001(raw: unknown, issuedAt = Date.now()): EqReport[] {
@@ -309,38 +221,42 @@ export function parseEqReportEA0015001(raw: unknown, issuedAt = Date.now()): EqR
   const reports: EqReport[] = [];
 
   for (const eq of earthquakes) {
-    const earthquakeNo = parseNumber(eq.EarthquakeNo);
-    if (earthquakeNo == null) continue;
-
     const info = eq.EarthquakeInfo;
     const epicenter = info?.Epicenter;
+
     const originTime = parseOriginTime(info?.OriginTime);
     if (originTime == null) continue;
 
-    const intensityMap = toIntensityByCounty(eq.Intensity?.ShakingArea);
-    const maxI = maxIntensity(intensityMap);
+    const magnitude = parseNumber(info?.EarthquakeMagnitude?.MagnitudeValue);
+    const depthKm = parseNumber(info?.FocalDepth);
+    const lat = parseNumber(epicenter?.EpicenterLatitude);
+    const lon = parseNumber(epicenter?.EpicenterLongitude);
+    const locationText = (epicenter?.Location || '').trim();
+    const earthquakeNo = parseNumber(eq.EarthquakeNo);
+
+    const id =
+      earthquakeNo != null
+        ? String(Math.trunc(earthquakeNo))
+        : deterministicId(['CWA', originTime, magnitude, lat, lon, locationText]);
 
     reports.push({
-      id: String(Math.trunc(earthquakeNo)),
+      id,
       source: 'CWA_REPORT',
-      earthquakeNo: Math.trunc(earthquakeNo),
+      earthquakeNo: earthquakeNo != null ? Math.trunc(earthquakeNo) : 0,
       originTime,
       issuedAt,
-      magnitude: parseNumber(info?.EarthquakeMagnitude?.MagnitudeValue),
-      depthKm: parseNumber(info?.FocalDepth),
+      magnitude,
+      depthKm,
       epicenter: {
-        lat: parseNumber(epicenter?.EpicenterLatitude) ?? 0,
-        lon: parseNumber(epicenter?.EpicenterLongitude) ?? 0,
-        locationText: (epicenter?.Location || '').trim()
+        lat: lat ?? 0,
+        lon: lon ?? 0,
+        locationText
       },
-      intensityByCounty: intensityMap,
-      maxIntensity: maxI,
-      reportContent: (eq.ReportContent || '').trim(),
-      web: (eq.Web || '').trim() || undefined,
-      images: {
-        report: (eq.ReportImageURI || '').trim() || undefined,
-        shakemap: (eq.ShakemapImageURI || '').trim() || undefined
-      },
+      intensityByCounty: {},
+      maxIntensity: undefined,
+      reportContent: undefined,
+      web: undefined,
+      images: undefined,
       raw: eq
     });
   }
@@ -348,135 +264,223 @@ export function parseEqReportEA0015001(raw: unknown, issuedAt = Date.now()): EqR
   return reports;
 }
 
+export async function ensureEarthquakeSchema(): Promise<void> {
+  if (schemaReadyPromise) return schemaReadyPromise;
+
+  schemaReadyPromise = (async () => {
+    await run(`CREATE TABLE IF NOT EXISTS earthquake_events (
+      id TEXT PRIMARY KEY,
+      origin_time TEXT NOT NULL,
+      magnitude REAL,
+      depth_km REAL,
+      lat REAL,
+      lon REAL,
+      location TEXT,
+      source TEXT NOT NULL DEFAULT 'CWA',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`);
+
+    await run(
+      'CREATE INDEX IF NOT EXISTS idx_eq_origin_time ON earthquake_events(origin_time)'
+    );
+    await run(
+      'CREATE INDEX IF NOT EXISTS idx_eq_created_at ON earthquake_events(created_at)'
+    );
+  })();
+
+  return schemaReadyPromise;
+}
+
+async function getEventRowById(id: string) {
+  return getOne<DbEventRow>('SELECT * FROM earthquake_events WHERE id = ?', [id]);
+}
+
+export async function upsertEarthquakeEvent(event: EarthquakeUpsertInput) {
+  await ensureEarthquakeSchema();
+
+  const normalizedOrigin = toIsoTime(event.originTime);
+  if (!normalizedOrigin) throw new Error('Invalid origin_time');
+
+  const autoId =
+    event.id ||
+    deterministicId([
+      normalizedOrigin,
+      event.magnitude,
+      event.lat,
+      event.lon,
+      event.location || '',
+      event.source || 'CWA'
+    ]);
+  const id = String(autoId);
+
+  const existing = await getOne<{ id: string; created_at: string }>(
+    'SELECT id, created_at FROM earthquake_events WHERE id = ?',
+    [id]
+  );
+
+  const nowIso = new Date().toISOString();
+  const createdAt = existing?.created_at || nowIso;
+  const source = (event.source || 'CWA').trim() || 'CWA';
+
+  await run(
+    `INSERT INTO earthquake_events (
+      id, origin_time, magnitude, depth_km, lat, lon, location, source, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      origin_time=excluded.origin_time,
+      magnitude=excluded.magnitude,
+      depth_km=excluded.depth_km,
+      lat=excluded.lat,
+      lon=excluded.lon,
+      location=excluded.location,
+      source=excluded.source,
+      updated_at=excluded.updated_at`,
+    [
+      id,
+      normalizedOrigin,
+      event.magnitude ?? null,
+      event.depthKm ?? null,
+      event.lat ?? null,
+      event.lon ?? null,
+      event.location ?? null,
+      source,
+      createdAt,
+      nowIso
+    ]
+  );
+
+  return { id, isNew: !existing };
+}
+
+export async function getEarthquakeEvents(options?: { sinceISO?: string; limit?: number }) {
+  await ensureEarthquakeSchema();
+
+  const sinceISO = options?.sinceISO || new Date(Date.now() - EVENTS_WINDOW_MS).toISOString();
+  const limit = Math.max(1, Math.min(EVENTS_LIMIT, Math.floor(options?.limit ?? EVENTS_LIMIT)));
+
+  const rows = await getAll<DbEventRow>(
+    `SELECT id, origin_time, magnitude, depth_km, lat, lon, location, source, created_at, updated_at
+     FROM earthquake_events
+     WHERE origin_time >= ?
+     ORDER BY origin_time DESC
+     LIMIT ?`,
+    [sinceISO, limit]
+  );
+
+  return rows.map(eventFromRow);
+}
+
+export async function getLatestEarthquake() {
+  const list = await getEarthquakeEvents({ limit: 1 });
+  return list[0] ?? null;
+}
+
+export async function pruneOldEarthquakes(olderThanISO: string) {
+  await ensureEarthquakeSchema();
+  const deleted = await runWithChanges(
+    'DELETE FROM earthquake_events WHERE origin_time < ?',
+    [olderThanISO]
+  );
+  return deleted;
+}
+
 export async function pollEqReport(force = false): Promise<void> {
+  await ensureEarthquakeSchema();
+
   const now = Date.now();
-  if (!force && now - state.lastPolledAt < POLL_INTERVAL_MS) return;
-  if (state.pollingPromise) {
-    await state.pollingPromise;
+  if (!force && now - lastPolledAt < POLL_INTERVAL_MS) return;
+  if (pollingPromise) {
+    await pollingPromise;
     return;
   }
 
-  state.pollingPromise = (async () => {
+  pollingPromise = (async () => {
     const fetchedAt = Date.now();
     const raw = await fetchCwaDatastore<RawResponse>(DATASET_ID, { limit: '50' });
     const reports = parseEqReportEA0015001(raw, fetchedAt);
-    for (const report of reports) upsertReport(report);
-    state.lastPolledAt = Date.now();
-    prune();
+
+    for (const report of reports) {
+      await upsertEarthquakeEvent({
+        id: report.id,
+        originTime: new Date(report.originTime).toISOString(),
+        magnitude: report.magnitude,
+        depthKm: report.depthKm,
+        lat: report.epicenter.lat,
+        lon: report.epicenter.lon,
+        location: report.epicenter.locationText,
+        source: 'CWA'
+      });
+    }
+
+    await pruneOldEarthquakes(
+      new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString()
+    );
+    lastPolledAt = Date.now();
   })();
 
   try {
-    await state.pollingPromise;
+    await pollingPromise;
   } finally {
-    state.pollingPromise = null;
+    pollingPromise = null;
   }
-}
-
-function normalizeTriggerPayload(input: TriggerWebhookPayload): Omit<EqTrigger, 'id' | 'receivedAt'> {
-  const source = (input.source || 'OTHER_APP').toUpperCase();
-  const county = normalizeCountyName(input.site?.county || '');
-  const town = (input.site?.town || '').trim();
-  const thresholdIntensity = Number(input.thresholdIntensity ?? 2);
-  const estimatedIntensity =
-    input.estimatedIntensity == null ? undefined : Number(input.estimatedIntensity);
-
-  if (!county) throw new Error('site.county is required');
-  if (!Number.isFinite(thresholdIntensity) || thresholdIntensity < 1 || thresholdIntensity > 7) {
-    throw new Error('thresholdIntensity must be between 1 and 7');
-  }
-
-  const triggeredAt = Number(input.triggeredAt ?? Date.now());
-  if (!Number.isFinite(triggeredAt)) throw new Error('triggeredAt must be a number');
-
-  return {
-    source: source === 'EQ_WAKEUP' ? 'EQ_WAKEUP' : 'OTHER_APP',
-    triggeredAt,
-    site: { county, town: town || undefined },
-    thresholdIntensity: Math.round(thresholdIntensity),
-    estimatedIntensity:
-      estimatedIntensity != null && Number.isFinite(estimatedIntensity)
-        ? Math.max(1, Math.min(7, Math.round(estimatedIntensity)))
-        : undefined,
-    raw: input.raw
-  };
 }
 
 export async function receiveEqTrigger(payload: TriggerWebhookPayload) {
-  await pollEqReport(false);
+  await ensureEarthquakeSchema();
+  try {
+    await pollEqReport(false);
+  } catch (error) {
+    // Trigger path should stay available even if CWA polling fails temporarily.
+    console.warn('[earthquake] pollEqReport failed before trigger upsert:', error);
+  }
 
-  const normalized = normalizeTriggerPayload(payload);
-  const receivedAt = Date.now();
+  const source =
+    (payload.source || 'OTHER_APP').toUpperCase() === 'EQ_WAKEUP' ? 'EQ_WAKEUP' : 'OTHER_APP';
 
-  const key = dedupKey(
-    normalized.source,
-    normalized.site.county,
-    normalized.site.town || '',
-    normalized.thresholdIntensity,
-    normalized.triggeredAt
+  const originTimeIso =
+    toIsoTime(payload.originTime) || toIsoTime(payload.triggeredAt) || new Date().toISOString();
+  const location = triggerLocation(payload) || '未知位置';
+
+  const magnitude = toFinite(payload.magnitude);
+  const depthKm = toFinite(payload.depthKm);
+  const lat = toFinite(payload.lat);
+  const lon = toFinite(payload.lon);
+
+  const id = triggerEventId(payload, originTimeIso, location);
+
+  const result = await upsertEarthquakeEvent({
+    id,
+    originTime: originTimeIso,
+    magnitude,
+    depthKm,
+    lat,
+    lon,
+    location,
+    source
+  });
+
+  await pruneOldEarthquakes(
+    new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString()
   );
-  const dedupedTriggerId = state.triggerDedupIdByKey.get(key);
-  if (dedupedTriggerId) {
-    const existing = state.triggersById.get(dedupedTriggerId);
-    if (existing) {
-      existing.triggeredAt = Math.max(existing.triggeredAt, normalized.triggeredAt);
-      existing.receivedAt = receivedAt;
-      existing.estimatedIntensity = normalized.estimatedIntensity ?? existing.estimatedIntensity;
-      existing.raw = normalized.raw ?? existing.raw;
-      state.triggersById.set(existing.id, existing);
 
-      return {
-        deduped: true,
-        trigger: existing,
-        event: state.eventsById.get(state.triggerToEventId.get(existing.id) || '') ?? null
-      };
-    }
-  }
-
-  const trigger: EqTrigger = {
-    id: randomUUID(),
-    source: normalized.source,
-    triggeredAt: normalized.triggeredAt,
-    site: normalized.site,
-    thresholdIntensity: normalized.thresholdIntensity,
-    estimatedIntensity: normalized.estimatedIntensity,
-    receivedAt,
-    raw: normalized.raw
-  };
-  state.triggersById.set(trigger.id, trigger);
-  state.triggerDedupIdByKey.set(key, trigger.id);
-
-  const report = pickBestReportForTrigger(trigger);
-  if (report) {
-    const reportEventId = state.reportToEventId.get(report.id) || report.id;
-    const existingEvent = state.eventsById.get(reportEventId);
-    const triggerIds = Array.from(new Set([...(existingEvent?.triggerIds ?? []), trigger.id]));
-    upsertReportEvent(report, triggerIds);
-    return {
-      deduped: false,
-      trigger,
-      event: state.eventsById.get(reportEventId) ?? null
-    };
-  }
-
-  upsertTriggerOnlyEvent(trigger);
-  prune();
-
+  const row = await getEventRowById(result.id);
   return {
-    deduped: false,
-    trigger,
-    event: state.eventsById.get(`trigger:${trigger.id}`) ?? null
+    id: result.id,
+    isNew: result.isNew,
+    event: row ? eventFromRow(row) : null
   };
 }
 
-export async function listEqEvents(limit = 50): Promise<EarthquakeEvent[]> {
+export async function listEqEvents(): Promise<EarthquakeEvent[]> {
   await pollEqReport(false);
-  const safeLimit = Math.max(1, Math.min(500, Math.floor(limit)));
-  return Array.from(state.eventsById.values())
-    .sort((a, b) => b.severityScore - a.severityScore || b.firstSeenAt - a.firstSeenAt)
-    .slice(0, safeLimit);
+  return getEarthquakeEvents({
+    sinceISO: new Date(Date.now() - EVENTS_WINDOW_MS).toISOString(),
+    limit: EVENTS_LIMIT
+  });
 }
 
 export async function getEqLatestEvent(): Promise<EarthquakeEvent | null> {
-  const list = await listEqEvents(1);
-  return list[0] ?? null;
+  await pollEqReport(false);
+  return getLatestEarthquake();
 }

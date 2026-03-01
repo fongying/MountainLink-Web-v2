@@ -1,6 +1,5 @@
-import { json } from '@sveltejs/kit';
-import { fetchColdAlerts } from '$lib/server/alerts/cold';
-import type { ColdAlert } from '$lib/types';
+﻿import { json } from '@sveltejs/kit';
+import { getColdAlertsCached } from '$lib/server/alerts/cold';
 
 function parseBool(v: string | null, defaultValue: boolean) {
   if (v == null) return defaultValue;
@@ -12,6 +11,13 @@ function parseLimit(v: string | null, defaultValue: number) {
   const n = Number(v ?? defaultValue);
   if (!Number.isFinite(n)) return defaultValue;
   return Math.max(1, Math.min(200, Math.floor(n)));
+}
+
+function coldLevelRank(level: string) {
+  if (level.includes('紅色')) return 4;
+  if (level.includes('橙色')) return 3;
+  if (level.includes('黃色')) return 2;
+  return 1;
 }
 
 export const GET = async ({ locals, url }: any) => {
@@ -29,12 +35,24 @@ export const GET = async ({ locals, url }: any) => {
       ? undefined
       : parseBool(expiresQuery, false);
 
-  let alerts = await fetchColdAlerts({
-    severityLevel: severityLevel || undefined,
-    expires
-  });
+  let alerts = await getColdAlertsCached();
 
-  alerts = alerts.slice().sort((a, b) => (b.issuedAt || 0) - (a.issuedAt || 0));
+  if (severityLevel) {
+    alerts = alerts.filter(
+      (a) =>
+        a.level.includes(severityLevel) ||
+        a.title.includes(severityLevel) ||
+        a.headline.includes(severityLevel)
+    );
+  }
+
+  if (typeof expires === 'boolean') {
+    const now = Date.now();
+    alerts = alerts.filter((a) => {
+      if (a.expiresAt == null) return !expires;
+      return expires ? a.expiresAt <= now : a.expiresAt > now;
+    });
+  }
 
   if (county) {
     alerts = alerts.filter((a) => a.counties.includes(county));
@@ -46,16 +64,9 @@ export const GET = async ({ locals, url }: any) => {
     alerts = alerts.filter((a) => a.status !== 'ended');
   }
 
-  const levels: Record<ColdAlert['level'], number> = {
-    低溫紅色燈號: 4,
-    低溫橙色燈號: 3,
-    低溫黃色燈號: 2,
-    低溫特報: 1
-  };
-
   alerts = alerts
     .slice()
-    .sort((a, b) => levels[b.level] - levels[a.level] || b.issuedAt - a.issuedAt)
+    .sort((a, b) => coldLevelRank(b.level) - coldLevelRank(a.level) || b.issuedAt - a.issuedAt)
     .slice(0, limit);
 
   return json({

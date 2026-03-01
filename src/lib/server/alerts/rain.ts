@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { RainAlert, RainLevel } from '$lib/types';
 import { fetchCwaDatastore } from '$lib/server/cwa';
+import { CWA_RAIN_TTL_MS } from '$lib/server/alerts/cache-config';
 
 const DATASET_ID = 'W-C0033-003';
 
@@ -30,6 +31,14 @@ type CwaRainResponse = {
     info?: CwaInfo[];
   };
 };
+
+type RainSnapshot = {
+  at: number;
+  data: RainAlert[];
+};
+
+let rainSnapshot: RainSnapshot | null = null;
+let rainInFlight: Promise<RainAlert[]> | null = null;
 
 function parseLevel(title: string, headline: string): RainLevel | null {
   const text = `${title} ${headline}`;
@@ -106,4 +115,32 @@ export async function fetchRainAlerts(options?: {
   }
 
   return alerts;
+}
+
+export function isRainCacheExpired(now = Date.now()) {
+  return !rainSnapshot || now - rainSnapshot.at >= CWA_RAIN_TTL_MS;
+}
+
+export async function getRainAlertsCached() {
+  if (!isRainCacheExpired() && rainSnapshot) {
+    return rainSnapshot.data.slice();
+  }
+
+  if (rainInFlight) {
+    const data = await rainInFlight;
+    return data.slice();
+  }
+
+  rainInFlight = (async () => {
+    const data = await fetchRainAlerts();
+    rainSnapshot = { at: Date.now(), data };
+    return data;
+  })();
+
+  try {
+    const data = await rainInFlight;
+    return data.slice();
+  } finally {
+    rainInFlight = null;
+  }
 }

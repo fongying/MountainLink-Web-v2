@@ -1,6 +1,5 @@
-import { json } from '@sveltejs/kit';
-import { fetchRainAlerts } from '$lib/server/alerts/rain';
-import type { RainAlert } from '$lib/types';
+﻿import { json } from '@sveltejs/kit';
+import { getRainAlertsCached } from '$lib/server/alerts/rain';
 
 function parseBool(v: string | null, defaultValue: boolean) {
   if (v == null) return defaultValue;
@@ -12,6 +11,14 @@ function parseLimit(v: string | null, defaultValue: number) {
   const n = Number(v ?? defaultValue);
   if (!Number.isFinite(n)) return defaultValue;
   return Math.max(1, Math.min(200, Math.floor(n)));
+}
+
+function rainLevelRank(level: string) {
+  if (level.includes('超大豪雨')) return 4;
+  if (level.includes('大豪雨')) return 3;
+  if (level.includes('豪雨')) return 2;
+  if (level.includes('大雨')) return 1;
+  return 0;
 }
 
 export const GET = async ({ locals, url }: any) => {
@@ -29,14 +36,24 @@ export const GET = async ({ locals, url }: any) => {
       ? undefined
       : parseBool(expiresQuery, false);
 
-  let alerts = await fetchRainAlerts({
-    severityLevel: severityLevel || undefined,
-    expires
-  });
+  let alerts = await getRainAlertsCached();
 
-  alerts = alerts
-    .slice()
-    .sort((a, b) => (b.issuedAt || 0) - (a.issuedAt || 0));
+  if (severityLevel) {
+    alerts = alerts.filter(
+      (a) =>
+        a.level.includes(severityLevel) ||
+        a.title.includes(severityLevel) ||
+        a.headline.includes(severityLevel)
+    );
+  }
+
+  if (typeof expires === 'boolean') {
+    const now = Date.now();
+    alerts = alerts.filter((a) => {
+      if (a.expiresAt == null) return !expires;
+      return expires ? a.expiresAt <= now : a.expiresAt > now;
+    });
+  }
 
   if (county) {
     alerts = alerts.filter((a) => a.areas.includes(county));
@@ -48,16 +65,9 @@ export const GET = async ({ locals, url }: any) => {
     alerts = alerts.filter((a) => a.status !== 'ended');
   }
 
-  const levels: Record<RainAlert['level'], number> = {
-    超大豪雨: 4,
-    大豪雨: 3,
-    豪雨: 2,
-    大雨: 1
-  };
-
   alerts = alerts
     .slice()
-    .sort((a, b) => levels[b.level] - levels[a.level] || b.issuedAt - a.issuedAt)
+    .sort((a, b) => rainLevelRank(b.level) - rainLevelRank(a.level) || b.issuedAt - a.issuedAt)
     .slice(0, limit);
 
   return json({

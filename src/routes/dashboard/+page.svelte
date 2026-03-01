@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { DeviceTelemetry, MLinkSseEvent } from '$lib/types';
-  import { connectSse } from '$lib/client/sse';
+  import type { AlertItem } from '$lib/types/alerts';
   import GoogleMapView from '$lib/components/GoogleMapView.svelte';
   import GoogleMap3DView from '$lib/components/GoogleMap3DView.svelte';
   import WeatherAlertPanel from '$lib/components/WeatherAlertPanel.svelte';
@@ -18,9 +18,112 @@
 
   let devices: DeviceTelemetry[] = data.devices;
   let sseStatus: 'open' | 'error' | 'connecting' = 'connecting';
+  let hazardItems: AlertItem[] = [];
+  let hazardLoading = true;
+  let hazardNotice = '';
+  let toasts: EqToast[] = [];
+  let hasHazardSnapshot = false;
+
+  const TOAST_LIFETIME_MS = 15000;
+  const MAX_TOASTS = 3;
+  const EQ_SOUND_SOURCES = ['/sounds/eq-alert.mp3', '/sounds/eq-alert.ogg'];
+  const seenEqAlertIds = new Set<string>();
+  const seenEqAlertOrder: string[] = [];
+  const toastTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  type HazardUpdatePayload = {
+    generatedAt: string;
+    items: AlertItem[];
+    reason?: string;
+    notice?: string;
+  };
+
+  type EqToast = {
+    id: string;
+    alertId: string;
+    title: string;
+    summary: string;
+    meta: string;
+    createdAt: number;
+  };
 
   const fmtTime = (ms: number) => new Date(ms).toLocaleString();
   const unitOf = (d: DeviceTelemetry) => d.sos ? '待救者' : (d as { unit?: string }).unit ?? '登山者';
+
+  function severityText(level: AlertItem['severity']) {
+    if (level === 'critical') return '高風險';
+    if (level === 'warning') return '警示';
+    if (level === 'watch') return '注意';
+    return '資訊';
+  }
+
+  function fmtIsoTime(iso?: string) {
+    if (!iso) return '';
+    const ms = Date.parse(iso);
+    return Number.isFinite(ms) ? fmtTime(ms) : '';
+  }
+
+  function rememberEqAlert(id: string) {
+    if (seenEqAlertIds.has(id)) return;
+    seenEqAlertIds.add(id);
+    seenEqAlertOrder.push(id);
+
+    if (seenEqAlertOrder.length > 300) {
+      const removed = seenEqAlertOrder.shift();
+      if (removed) seenEqAlertIds.delete(removed);
+    }
+  }
+
+  function dismissToast(id: string) {
+    const timer = toastTimers.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      toastTimers.delete(id);
+    }
+    toasts = toasts.filter((toast) => toast.id !== id);
+  }
+
+  function pushEarthquakeToast(alert: AlertItem) {
+    const id = `${alert.id}-${Date.now()}`;
+    const toast: EqToast = {
+      id,
+      alertId: alert.id,
+      title: alert.title || '地震快訊',
+      summary: alert.summary || '',
+      meta: [severityText(alert.severity), alert.region, fmtIsoTime(alert.eventAt ?? alert.issuedAt)].filter(Boolean).join(' · '),
+      createdAt: Date.now()
+    };
+
+    toasts = [toast, ...toasts].slice(0, MAX_TOASTS);
+
+    const activeIds = new Set(toasts.map((item) => item.id));
+    for (const [toastId, timer] of toastTimers.entries()) {
+      if (!activeIds.has(toastId)) {
+        clearTimeout(timer);
+        toastTimers.delete(toastId);
+      }
+    }
+
+    const timer = setTimeout(() => {
+      dismissToast(id);
+    }, TOAST_LIFETIME_MS);
+
+    toastTimers.set(id, timer);
+  }
+
+  async function playEarthquakeSound() {
+    for (const src of EQ_SOUND_SOURCES) {
+      try {
+        const audio = new Audio(src);
+        audio.preload = 'auto';
+        audio.volume = 1;
+        await audio.play();
+        return;
+      } catch {
+        // Ignore autoplay blocks and try fallback source.
+      }
+    }
+  }
 
   function onSelect(e: CustomEvent<{ deviceId: string }>) {
     goto(`/devices/${encodeURIComponent(e.detail.deviceId)}`);
@@ -58,8 +161,64 @@
   }
 
   onMount(() => {
-    const disconnect = connectSse('/api/stream', handleEvent, (status) => (sseStatus = status));
-    return () => disconnect();
+    const es = new EventSource('/api/stream');
+
+    es.onopen = () => {
+      sseStatus = 'open';
+    };
+
+    es.onerror = () => {
+      sseStatus = 'error';
+    };
+
+    const telemetryHandler = (e: MessageEvent) => {
+      try {
+        handleEvent(JSON.parse(e.data) as MLinkSseEvent);
+      } catch {
+        // ignore parse error
+      }
+    };
+
+    const hazardHandler = (e: MessageEvent) => {
+      try {
+        const payload = JSON.parse(e.data) as HazardUpdatePayload;
+        const nextItems = payload.items ?? [];
+        const eqAlerts = nextItems.filter((item) => item.type === 'earthquake');
+
+        if (!hasHazardSnapshot) {
+          eqAlerts.forEach((item) => rememberEqAlert(item.id));
+          hasHazardSnapshot = true;
+        } else {
+          const freshEqAlerts = eqAlerts.filter((item) => !seenEqAlertIds.has(item.id));
+          if (freshEqAlerts.length > 0) {
+            freshEqAlerts.forEach((item) => {
+              rememberEqAlert(item.id);
+              pushEarthquakeToast(item);
+            });
+            void playEarthquakeSound();
+          }
+        }
+
+        hazardItems = nextItems;
+        hazardNotice = payload.notice ?? '';
+      } catch {
+        hazardNotice = '災害資料解析失敗';
+      } finally {
+        hazardLoading = false;
+      }
+    };
+
+    es.addEventListener('telemetry', telemetryHandler);
+    es.addEventListener('online', telemetryHandler);
+    es.addEventListener('hazard_update', hazardHandler);
+
+    return () => {
+      for (const timer of toastTimers.values()) {
+        clearTimeout(timer);
+      }
+      toastTimers.clear();
+      es.close();
+    };
   });
 </script>
 
@@ -93,7 +252,28 @@
     </div>
   </header>
 
-  <WeatherAlertPanel />
+  <WeatherAlertPanel items={hazardItems} loading={hazardLoading} notice={hazardNotice} />
+
+  <div class="toastStack" aria-live="assertive" aria-atomic="false">
+    {#each toasts as toast (toast.id)}
+      <article class="eqToast" role="alert">
+        <div class="eqToastHead">
+          <strong class="eqToastLabel">地震快訊</strong>
+          <button class="eqToastClose" type="button" on:click={() => dismissToast(toast.id)} aria-label="關閉通知">
+            ×
+          </button>
+        </div>
+        <p class="eqToastTitle">{toast.title}</p>
+        {#if toast.meta}
+          <p class="eqToastMeta">{toast.meta}</p>
+        {/if}
+        {#if toast.summary}
+          <p class="eqToastBody">{toast.summary}</p>
+        {/if}
+        <p class="eqToastTime">{fmtTime(toast.createdAt)}</p>
+      </article>
+    {/each}
+  </div>
 
   <section class="card mapCard">
     <div class="cardHeader">
@@ -301,6 +481,88 @@
     margin: 0;
     font-size: 12px;
     color: var(--muted);
+  }
+
+  .toastStack{
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    width: min(360px, calc(100vw - 24px));
+    display: grid;
+    gap: 10px;
+    z-index: 60;
+    pointer-events: none;
+  }
+
+  .eqToast{
+    pointer-events: auto;
+    border-radius: 12px;
+    border: 1px solid rgba(176, 0, 32, 0.24);
+    border-left: 4px solid #b00020;
+    background: rgba(255, 255, 255, 0.96);
+    box-shadow: 0 14px 30px rgba(12, 20, 22, 0.24);
+    padding: 10px 12px;
+    animation: toast-in 180ms ease-out;
+  }
+
+  .eqToastHead{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+
+  .eqToastLabel{
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    color: #8a1322;
+  }
+
+  .eqToastClose{
+    border: none;
+    background: transparent;
+    color: #7f141f;
+    cursor: pointer;
+    line-height: 1;
+    font-size: 18px;
+    padding: 0;
+  }
+
+  .eqToastTitle{
+    margin: 0;
+    font-weight: 700;
+    color: #1c2325;
+  }
+
+  .eqToastBody{
+    margin: 4px 0 0;
+    font-size: 13px;
+    color: #354448;
+    line-height: 1.45;
+  }
+
+  .eqToastMeta{
+    margin: 4px 0 0;
+    font-size: 12px;
+    color: #6a7a7e;
+  }
+
+  .eqToastTime{
+    margin: 6px 0 0;
+    font-size: 11px;
+    color: #607174;
+  }
+
+  @keyframes toast-in{
+    from{
+      opacity: 0;
+      transform: translateY(-8px) scale(0.98);
+    }
+    to{
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
   }
 
   .card{
@@ -537,5 +799,10 @@
   @media (max-width: 640px){
     .dashboardPage{ padding: 18px 14px 32px; }
     .card{ padding: 14px; }
+    .toastStack{
+      top: 12px;
+      right: 12px;
+      width: calc(100vw - 24px);
+    }
   }
 </style>

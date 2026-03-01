@@ -1,192 +1,204 @@
-﻿# MountainLink Web v2
+# MountainLink Web v2
 
-MountainLink 是一個以 **Blue Force Tracker** 概念打造的搜救監控平台，提供裝置定位、即時遙測、單位管理與自然災害告警（豪雨 / 低溫 / 地震）整合。
+MountainLink is a Blue Force Tracker style rescue platform that combines real-time device tracking, unit management, and natural hazard alerts (rain, cold, earthquake).
 
-本 repo 為 Web 端實作（SvelteKit + TypeScript + SQLite + Google Maps）。
+Tech stack: `SvelteKit + TypeScript + SQLite + Google Maps + SSE`.
 
----
+## Deployment Readiness (Current Check)
 
-## 1) 系統目標
+- `npm run check`: PASS (0 errors, 0 warnings)
+- `npm run build`: PASS (adapter-node output generated)
+- Dashboard:
+  - 2D/3D map view and live device state
+  - Unified Natural Hazard Alert Zone (rain/cold/earthquake)
+  - Earthquake toast and sound (`static/sounds/eq-alert.mp3`, `static/sounds/eq-alert.ogg`)
+- Earthquake webhook:
+  - `POST /api/hooks/eq/trigger`
+  - HMAC verification, SQLite persistence, SSE `hazard_update` broadcast
 
-- 即時掌握山域/任務裝置位置與狀態
-- 區分單位角色（登山者、待救者、特搜、警消、志工）
-- 讓指揮端在同一畫面查看裝置態勢 + 自然災害警示
-- 支援管理員做裝置單位設定與帳號綁定
+## Architecture
 
----
+- Frontend: SvelteKit (Svelte 5)
+- Backend: SvelteKit server routes (same repository)
+- Database: SQLite (`data/app.db`)
+- Real-time channel: SSE (`/api/stream`)
+- External data:
+  - CWA rain: `W-C0033-003`
+  - CWA cold: `W-C0033-004`
+  - CWA earthquake: `E-A0015-001`
+- External trigger: earthquake webhook (for example EQ Wake Up)
 
-## 2) 技術架構
+## Main Features
 
-### Frontend
-- SvelteKit（Svelte 5）
-- TypeScript
-- Google Maps JavaScript API（2D + 3D）
+- Dashboard (`/dashboard`)
+  - 2D/3D map overview
+  - Device list and status
+  - Natural Hazard Alert Zone
+- Device detail (`/devices/[id]`)
+  - Live telemetry and event logs
+- Device unit admin (`/devices/[id]/unit`)
+  - Admin can assign unit role
+  - Admin can bind device to user account
 
-### Backend (same repo)
-- SvelteKit Server Routes
-- SSE (`/api/stream`) 用於即時資料流
-- SQLite (`data/app.db`) 儲存帳號、session、裝置單位/綁定
+## Local Development
 
-### External Data / Integration
-- CWA Open Data（天氣與地震）
-  - 豪雨：`W-C0033-003`
-  - 低溫：`W-C0033-004`
-  - 地震報告：`E-A0015-001`
-- 外部地震 Trigger Webhook（例如地牛 / 其他軟體）
-
----
-
-## 3) 主要功能
-
-- Dashboard
-  - 2D / 3D 地圖切換
-  - 即時裝置清單
-  - **自然災害警示區**（豪雨、低溫、地震整合）
-- Device Detail (`/devices/[id]`)
-  - 單裝置即時資訊（心率/電量/SOS/訊號）
-  - 即時地圖與事件紀錄
-- Device Unit Admin (`/devices/[id]/unit`)
-  - 管理員設定裝置單位
-  - 管理員綁定裝置到帳號（DB 寫入）
-
----
-
-## 4) 快速開始
-
-### Prerequisites
-- Node.js 18+（建議 20+）
-- npm
-
-### Install
+### 1) Install dependencies
 
 ```bash
 npm install
 ```
 
-### Run (dev)
+### 2) Configure `.env`
+
+```bash
+VITE_GOOGLE_MAPS_API_KEY=YOUR_GOOGLE_MAPS_KEY
+VITE_GOOGLE_MAP_ID=YOUR_GOOGLE_MAP_ID
+CWA_API_KEY=YOUR_CWA_API_KEY
+MLINK_WEBHOOK_SECRET=YOUR_LONG_RANDOM_SECRET
+
+# Optional cache TTL in seconds
+CWA_RAIN_TTL_SEC=600
+CWA_COLD_TTL_SEC=600
+```
+
+### 3) Start dev server
 
 ```bash
 npm run dev
 ```
 
-開啟：`http://localhost:5173`
+Default URL: `http://localhost:5173`
 
----
-
-## 5) 環境變數
-
-在專案根目錄建立 `.env`：
+## NPM Scripts
 
 ```bash
-VITE_GOOGLE_MAPS_API_KEY=YOUR_GOOGLE_MAPS_KEY
-VITE_GOOGLE_MAP_ID=YOUR_GOOGLE_MAP_ID
-
-CWA_API_KEY=YOUR_CWA_API_KEY
-MLINK_WEBHOOK_SECRET=YOUR_WEBHOOK_SECRET
+npm run dev
+npm run check
+npm run build
+npm run preview
 ```
 
-### 說明
-- `VITE_GOOGLE_MAPS_API_KEY`：Google Maps JS API key
-- `VITE_GOOGLE_MAP_ID`：3D 地圖所需 Map ID
-- `CWA_API_KEY`：中央氣象署 Open Data API key
-- `MLINK_WEBHOOK_SECRET`：地震 Trigger Webhook HMAC 驗簽密鑰
+## API Endpoints
 
-> 注意：Map ID 需啟用對應 API，否則 3D 圖層可能無法正常顯示。
+- `GET /api/stream`: SSE (`telemetry`, `online`, `hazard_update`)
+- `GET /api/alerts/rain`: rain alerts (server-side cache)
+- `GET /api/alerts/cold`: cold alerts (server-side cache)
+- `GET /api/eq/events`: earthquake events (last 3 days, max 3)
+- `GET /api/eq/latest`: latest earthquake event
+- `POST /api/hooks/eq/trigger`: external earthquake trigger (HMAC)
 
----
+Note: most API routes require authenticated session (`locals.user`).
 
-## 6) NPM Scripts
+## Earthquake Trigger Webhook
+
+### Required headers
+
+- `X-MLINK-Timestamp`: unix milliseconds
+- `X-MLINK-Signature`: `hex(hmac_sha256(secret, timestamp + "." + rawBody))`
+
+### Validation behavior
+
+- Missing `MLINK_WEBHOOK_SECRET` on server: `503`
+- Invalid signature: `401`
+- Allowed timestamp skew: `+/- 60 seconds`
+
+### Success response
+
+```json
+{ "ok": true, "id": "event-id", "isNew": true }
+```
+
+## Windows Bridge Scripts
+
+- `scripts/eq/callcenter_eq.bat`
+- `scripts/eq/callcenter_eq.ps1`
+- `scripts/eq/eq-bridge.log`
+
+The `.ps1` script builds payload, computes HMAC, posts webhook, retries, and logs results.
+For production, update:
+
+- `$webhookUrl`
+- `$secret` (must match server `MLINK_WEBHOOK_SECRET`)
+
+## VPS Deployment (Node + Nginx)
+
+### 1) Build on server
 
 ```bash
-npm run dev          # 開發模式
-npm run build        # 打包
-npm run preview      # 預覽 build
-npm run check        # Svelte + TypeScript 檢查
-npm run check:watch  # 持續檢查
+npm ci
+npm run check
+npm run build
 ```
 
----
+### 2) Run app (adapter-node)
 
-## 7) 重要路由
+```bash
+node build
+```
 
-### UI Pages
-- `/`：首頁
-- `/login`：登入
-- `/register`：註冊（Admin 可用）
-- `/dashboard`：主控台
-- `/devices/[id]`：裝置詳情
-- `/devices/[id]/unit`：裝置單位/綁定設定（Admin）
+Use PM2 or systemd for process supervision.
 
-### API
-- `GET /api/stream`：SSE 即時資料
-- `GET /api/alerts/rain`：豪雨特報
-- `GET /api/alerts/cold`：低溫特報
-- `GET /api/eq/events`：地震事件列表
-- `GET /api/eq/latest`：最新地震事件
-- `POST /api/hooks/eq/trigger`：外部地震 trigger webhook（HMAC 驗證）
+### 3) Required env vars on VPS
 
-> 多數 API 需要登入 session（`locals.user`）才可存取。
+- `VITE_GOOGLE_MAPS_API_KEY`
+- `VITE_GOOGLE_MAP_ID`
+- `CWA_API_KEY`
+- `MLINK_WEBHOOK_SECRET`
+- `CWA_RAIN_TTL_SEC` (optional, default 600)
+- `CWA_COLD_TTL_SEC` (optional, default 600)
+- `PORT` (optional, default 3000)
+- `HOST` (recommended `0.0.0.0`)
 
----
+### 4) Nginx setting for SSE
 
-## 8) 告警與地震模組摘要
+Disable buffering for `/api/stream` to avoid SSE delays/disconnects:
 
-### 自然災害警示區
-- 整合豪雨 / 低溫 / 地震
-- 可切換篩選（全部、豪雨、低溫、地震）
-- 地震通知為防洗版策略：**近 3 天 + 最多 3 則**
+```nginx
+location /api/stream {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_http_version 1.1;
+    proxy_set_header Connection '';
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+}
+```
 
-### 地震資料來源整合
-- Report：CWA `E-A0015-001` 輪詢
-- Trigger：外部 webhook 主動推送
-- 後端會做 dedup + merge，形成統一 `EarthquakeEvent`
+## Database
 
-### Webhook 驗證規則
-- Header:
-  - `X-MLINK-Timestamp`
-  - `X-MLINK-Signature`
-- Signature:
-  - `hex(hmac_sha256(secret, timestamp + "." + rawBody))`
-- 允許時間偏差：`±60s`
+SQLite file: `data/app.db`
 
----
+Main tables:
 
-## 9) 資料庫
-
-SQLite 檔案：`data/app.db`
-
-核心資料表：
 - `users`
 - `sessions`
 - `telemetry_history`
 - `device_units`
 - `device_bindings`
+- `earthquake_events`
 
-初始化/遷移邏輯在：`src/lib/server/db.ts`
+Schema creation/ensure is in:
 
----
+- `src/lib/server/db.ts`
+- `src/lib/server/earthquake.ts`
 
-## 10) 專案目錄重點
+## Important Paths
 
-- `src/routes/dashboard/+page.svelte`：主控台
-- `src/lib/components/WeatherAlertPanel.svelte`：自然災害警示區
-- `src/lib/server/alerts/*`：豪雨/低溫解析
-- `src/lib/server/earthquake.ts`：地震 report/trigger 合併邏輯
-- `src/routes/api/hooks/eq/trigger/+server.ts`：地震 webhook 入口
-- `src/lib/components/DeviceMap2D.svelte`：2D 地圖與標記
-- `src/lib/components/GoogleMap3DView.svelte`：3D 地圖
+- `src/routes/dashboard/+page.svelte`
+- `src/lib/components/WeatherAlertPanel.svelte`
+- `src/lib/server/hazards.ts`
+- `src/lib/server/stream.ts`
+- `src/lib/server/earthquake.ts`
+- `src/lib/server/alerts/rain.ts`
+- `src/lib/server/alerts/cold.ts`
+- `src/routes/api/hooks/eq/trigger/+server.ts`
+- `scripts/eq/callcenter_eq.ps1`
 
----
+## Known Limitations
 
-## 11) 已知事項 / 後續建議
+- Device telemetry is still mock-stream based (not yet wired to production MQTT ingestion).
+- Some legacy comments still contain old encoding artifacts (runtime is not affected).
 
-- 部分舊頁文字仍有編碼亂碼（mojibake）風險，建議逐頁統一 UTF-8 正規化。
-- 地震事件目前為 in-memory 狀態（重啟後重建），若要持久化可落 DB。
-- 目前 SSE 主要推送遙測；地震/災害可再擴充 SSE 主動推播。
-- 目前裝置遙測仍以 mock 流為主，之後可替換成正式 MQTT/HTTP ingestion。
+## License
 
----
-
-## 12) License
-
-此專案授權與使用條款請依團隊內部規範或另附文件。
+Follow internal team policy or project-specific license documents.
