@@ -42,7 +42,10 @@
   $: sosText = device.sos ? '🚨 SOS 觸發中' : '狀態正常';
   $: sosColor = device.sos ? '#b00020' : '#166534';
   $: hrText = device.hr != null ? `${device.hr} bpm` : '—';
-  $: batText = device.battery != null ? `${device.battery}%` : '—';
+  $: batText = device.battery != null ? `${device.battery}%${device.charging ? '（充電中）' : ''}` : '—';
+  $: spo2Text = device.spo2 != null ? `${device.spo2}%` : '—';
+  $: bpText = device.bpHi != null && device.bpLo != null ? `${device.bpHi}/${device.bpLo}` : '—';
+  $: btText = device.bt != null ? `${device.bt}°C` : '—';
 </script>
 
 <div class="card">
@@ -59,6 +62,9 @@
       <div><b>座標：</b>{coordText(device)}</div>
       <div><b>心率：</b>{hrText}</div>
       <div><b>電量：</b>{batText}</div>
+      <div><b>血氧：</b>{spo2Text}</div>
+      <div><b>血壓：</b>{bpText}</div>
+      <div><b>體溫：</b>{btText}</div>
       <div><b>狀態：</b>{device.online ? 'Online' : 'Offline'}</div>
       <div class="sos" style={`color: ${sosColor};`}>{sosText}</div>
       <div class="muted"><b>最後更新：</b>{updatedText(device)}</div>

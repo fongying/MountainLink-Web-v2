@@ -3,6 +3,7 @@ export type DeviceTelemetry = {
   deviceId: string;
   online: boolean;
   battery: number; // 0~100
+  charging?: boolean;
   hr?: number;
   lat?: number;
   lon?: number;
@@ -13,6 +14,15 @@ export type DeviceTelemetry = {
   snr?: number;
   sats?: number;
   speed?: number;
+  spo2?: number;
+  bpHi?: number;
+  bpLo?: number;
+  bt?: number;
+  packetId?: number;
+  sender?: string;
+  channel?: number;
+  hopsAway?: number;
+  hopStart?: number;
   unit?: string;
 };
 

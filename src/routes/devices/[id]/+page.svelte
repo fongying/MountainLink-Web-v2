@@ -257,7 +257,7 @@
 
           <div class="kvLabel">電量</div>
           <div class="kvValue">
-            {current.battery}%
+            {current.battery}%{#if current.charging}（充電中）{/if}
             {#if current.battery <= 15}
               <span class="warn">低電量</span>
             {/if}
@@ -265,6 +265,15 @@
 
           <div class="kvLabel">心率</div>
           <div class="kvValue">{current.hr ?? '—'} bpm</div>
+
+          <div class="kvLabel">血氧</div>
+          <div class="kvValue">{current.spo2 ?? '—'}%</div>
+
+          <div class="kvLabel">血壓</div>
+          <div class="kvValue">{current.bpHi ?? '—'} / {current.bpLo ?? '—'}</div>
+
+          <div class="kvLabel">體溫</div>
+          <div class="kvValue">{current.bt ?? '—'}°C</div>
 
           <div class="kvLabel">座標</div>
           <div class="kvValue mono">

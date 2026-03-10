@@ -21,6 +21,7 @@
   let hazardItems: AlertItem[] = [];
   let hazardLoading = true;
   let hazardNotice = '';
+  let testDispatchBusy = false;
   let toasts: EqToast[] = [];
   let hasHazardSnapshot = false;
 
@@ -49,6 +50,7 @@
 
   const fmtTime = (ms: number) => new Date(ms).toLocaleString();
   const unitOf = (d: DeviceTelemetry) => d.sos ? '待救者' : (d as { unit?: string }).unit ?? '登山者';
+  const batteryText = (d: DeviceTelemetry) => d.charging ? `${d.battery}%（充電中）` : `${d.battery}%`;
 
   function severityText(level: AlertItem['severity']) {
     if (level === 'critical') return '高風險';
@@ -127,6 +129,24 @@
 
   function onSelect(e: CustomEvent<{ deviceId: string }>) {
     goto(`/devices/${encodeURIComponent(e.detail.deviceId)}`);
+  }
+
+  async function triggerTestDispatch() {
+    if (testDispatchBusy) return;
+    testDispatchBusy = true;
+    try {
+      const res = await fetch('/api/alerts/test-dispatch', {
+        method: 'POST'
+      });
+      const payload = await res.json().catch(() => ({}));
+      hazardNotice = res.ok
+        ? (payload.message as string) || '測試通報已送出。'
+        : (payload.error as string) || '測試通報送出失敗。';
+    } catch {
+      hazardNotice = '測試通報送出失敗。';
+    } finally {
+      testDispatchBusy = false;
+    }
   }
 
   function upsertDevices(next: DeviceTelemetry[]) {
@@ -252,7 +272,14 @@
     </div>
   </header>
 
-  <WeatherAlertPanel items={hazardItems} loading={hazardLoading} notice={hazardNotice} />
+  <WeatherAlertPanel
+    items={hazardItems}
+    loading={hazardLoading}
+    notice={hazardNotice}
+    showTestButton={Boolean(data.user?.is_admin)}
+    {testDispatchBusy}
+    onTestDispatch={triggerTestDispatch}
+  />
 
   <div class="toastStack" aria-live="assertive" aria-atomic="false">
     {#each toasts as toast (toast.id)}
@@ -343,7 +370,7 @@
 
             <div class="deviceMeta">
               <p>單位：{unitOf(d)}</p>
-              <p>電量：{d.battery}% {#if d.battery <= 15}<span class="warn">低電量</span>{/if}</p>
+              <p>電量：{batteryText(d)} {#if d.battery <= 15}<span class="warn">低電量</span>{/if}</p>
               <p>心率：{d.hr ?? '—'} bpm</p>
               <p>座標：{d.lat ?? '—'}, {d.lon ?? '—'} {#if d.alt != null}(alt {d.alt}m){/if}</p>
               <p>訊號：RSSI {d.rssi ?? '—'} / SNR {d.snr ?? '—'}</p>

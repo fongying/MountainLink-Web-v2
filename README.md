@@ -55,6 +55,9 @@ VITE_GOOGLE_MAPS_API_KEY=YOUR_GOOGLE_MAPS_KEY
 VITE_GOOGLE_MAP_ID=YOUR_GOOGLE_MAP_ID
 CWA_API_KEY=YOUR_CWA_API_KEY
 MLINK_WEBHOOK_SECRET=YOUR_LONG_RANDOM_SECRET
+MLINK_INGEST_API_KEY=YOUR_INGEST_API_KEY
+MLINK_ALERT_WEBHOOK_URL=YOUR_NODE_RED_WEBHOOK_URL
+MLINK_ALERT_WEBHOOK_SECRET=YOUR_NODE_RED_WEBHOOK_SECRET
 
 # Optional cache TTL in seconds
 CWA_RAIN_TTL_SEC=600
@@ -85,6 +88,7 @@ npm run preview
 - `GET /api/alerts/cold`: cold alerts (server-side cache)
 - `GET /api/eq/events`: earthquake events (last 3 days, max 3)
 - `GET /api/eq/latest`: latest earthquake event
+- `POST /api/ingest`: device telemetry ingest
 - `POST /api/hooks/eq/trigger`: external earthquake trigger (HMAC)
 
 Note: most API routes require authenticated session (`locals.user`).
@@ -106,6 +110,73 @@ Note: most API routes require authenticated session (`locals.user`).
 
 ```json
 { "ok": true, "id": "event-id", "isNew": true }
+```
+
+## Device Telemetry Ingest
+
+Use `POST /api/ingest` with either:
+
+- `X-MLINK-INGEST-KEY: <MLINK_INGEST_API_KEY>`
+- or `Authorization: Bearer <MLINK_INGEST_API_KEY>`
+
+Current ingest accepts the Node-RED normalized payload and binds records by `device_id`.
+
+Example payload:
+
+```json
+{
+  "recv_ts": "2026-03-09T18:43:43.000Z",
+  "packet_id": 1407811794,
+  "sender": "!7a6bf098",
+  "from": 3234013012,
+  "channel": 1,
+  "hops_away": 0,
+  "hop_start": 3,
+  "rssi": -38,
+  "snr": 9.5,
+  "device_id": "c0c31f54",
+  "hr": 85,
+  "sos": 0,
+  "battery": 101,
+  "spo2": 98,
+  "bp_hi": 115,
+  "bp_lo": 80,
+  "bt": 36.8,
+  "raw_text": "MLINK1,id=c0c31f54,hr=85,sos=0,bat=101,spo2=98,bp=115/80,bt=36.8"
+}
+```
+
+## Hazard Dispatch To Node-RED
+
+When `MLINK_ALERT_WEBHOOK_URL` is configured, the server dispatches rain, cold, and earthquake alerts to Node-RED.
+
+Rules:
+
+- Send once when a new alert becomes active
+- Send once again when the alert is ended / cleared
+- Re-send only when alert content changes
+- No periodic reminder resend
+
+Optional HMAC headers are added when `MLINK_ALERT_WEBHOOK_SECRET` is configured:
+
+- `X-MLINK-Timestamp`
+- `X-MLINK-Signature`
+
+Example webhook payload:
+
+```json
+{
+  "id": "rain-abc123",
+  "type": "rain",
+  "status": "active",
+  "severity": "watch",
+  "title": "大雨特報",
+  "region": "宜蘭縣、花蓮縣、南投縣",
+  "topic": "mlink/alerts",
+  "message": "[注意]大雨特報,區域:宜蘭、花蓮、南投",
+  "generatedAt": "2026-03-10T08:00:00.000Z",
+  "reason": "hazard_monitor_refresh"
+}
 ```
 
 ## Windows Bridge Scripts

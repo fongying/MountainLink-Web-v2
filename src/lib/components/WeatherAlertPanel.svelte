@@ -5,6 +5,9 @@
   export let items: AlertItem[] = [];
   export let loading = false;
   export let notice = '';
+  export let showTestButton = false;
+  export let testDispatchBusy = false;
+  export let onTestDispatch: (() => void) | undefined;
 
   let view: 'all' | HazardType = 'all';
 
@@ -54,6 +57,11 @@
       <p class="muted">同一清單顯示雨、低溫、地震；地震只保留近 3 天最多 3 筆</p>
     </div>
     <div class="meta">
+      {#if showTestButton}
+        <button class="testButton" type="button" on:click={() => onTestDispatch?.()} disabled={testDispatchBusy}>
+          {#if testDispatchBusy}發送中...{:else}測試發送{/if}
+        </button>
+      {/if}
       <div class="segment" role="group" aria-label="Hazard filter">
         <button class={`seg ${view === 'all' ? 'seg-active' : ''}`} type="button" on:click={() => (view = 'all')} aria-pressed={view === 'all'}>
           全部
@@ -154,6 +162,22 @@
     gap: 4px;
     font-size: 12px;
     color: #53656a;
+  }
+
+  .testButton {
+    border: 1px solid rgba(12, 40, 46, 0.16);
+    border-radius: 999px;
+    padding: 6px 12px;
+    background: #0f1a1c;
+    color: #f8fbfb;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .testButton:disabled {
+    opacity: 0.6;
+    cursor: wait;
   }
 
   .segment {

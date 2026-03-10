@@ -102,6 +102,7 @@ export function mapEqToAlertItems(rawEq: unknown): AlertItem[] {
     return {
       id,
       type: 'earthquake',
+      status: 'active',
       title,
       summary,
       severity: eqSeverityByMagnitude(magnitude),
@@ -134,6 +135,7 @@ export function mapColdToAlertItems(rawCold: unknown): AlertItem[] {
         (typeof r.id === 'string' && r.id) ||
         fallbackId([title, headline, toIso(r.issuedAt), index]),
       type: 'cold',
+      status: typeof r.status === 'string' && r.status === 'ended' ? 'ended' : 'active',
       title,
       summary: headline || '低溫警示',
       severity: coldSeverity(level),
@@ -164,6 +166,7 @@ export function mapRainToAlertItems(rawRain: unknown): AlertItem[] {
         (typeof r.id === 'string' && r.id) ||
         fallbackId([title, headline, toIso(r.issuedAt), index]),
       type: 'rain',
+      status: typeof r.status === 'string' && r.status === 'ended' ? 'ended' : 'active',
       title,
       summary: headline || '降雨警示',
       severity: rainSeverity(level),

@@ -1,7 +1,9 @@
 import type { Handle } from '@sveltejs/kit';
 import { getUserBySessionId, SESSION_COOKIE_NAME } from '$lib/server/auth';
+import { ensureHazardMonitorLoop } from '$lib/server/hazard-monitor';
 
 export const handle: Handle = async ({ event, resolve }) => {
+  ensureHazardMonitorLoop();
   const sid = event.cookies.get(SESSION_COOKIE_NAME);
   //console.log('SID=', sid); // ✅ 暫時除錯用
   event.locals.user = sid ? await getUserBySessionId(sid) : null;
