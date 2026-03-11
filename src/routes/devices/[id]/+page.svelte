@@ -39,6 +39,7 @@
 
   let logs: string[] = [];
   const fmtTime = (ms: number) => new Date(ms).toLocaleString();
+  const displayTitle = (d: DeviceTelemetry | null) => d?.displayName?.trim() || d?.deviceId || data.deviceId;
 
   function pushLog(msg: string) {
     // 少拷貝：頭插仍需新陣列，但固定長度
@@ -175,8 +176,9 @@
       <h1>裝置詳情</h1>
       <p class="deviceLine">
         <span>裝置</span>
-        <strong>{data.deviceId}</strong>
+        <strong>{displayTitle(current ?? data.device)}</strong>
       </p>
+      <p class="deviceIdLine">ID：{data.deviceId}</p>
     </div>
     <div class="heroRight">
       <div class="heroActions">
@@ -253,7 +255,7 @@
           </div>
 
           <div class="kvLabel">單位</div>
-          <div class="kvValue">{current?.sos ? '待救者' : (current as any)?.unit ?? '登山者'}</div>
+          <div class="kvValue">{(current as any)?.unit ?? '登山者'}</div>
 
           <div class="kvLabel">電量</div>
           <div class="kvValue">
@@ -435,6 +437,12 @@
     margin-left: 6px;
     font-weight: 700;
     color: var(--ink);
+  }
+
+  .deviceIdLine{
+    margin: 4px 0 0;
+    font-size: 12px;
+    color: var(--muted);
   }
 
   .heroRight{

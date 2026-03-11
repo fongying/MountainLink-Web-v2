@@ -1,27 +1,55 @@
 <script lang="ts">
   export let data: {
     deviceId: string;
+    displayName: string;
     unit: string;
     units: string[];
     users: { id: number; username: string; is_admin: number }[];
     boundUserId: number | null;
   };
+
+  export let form:
+    | {
+        error?: string;
+        displayName?: string;
+        unit?: string;
+        boundUserId?: string;
+      }
+    | undefined;
+
+  let displayName = form?.displayName ?? data.displayName ?? '';
+  let unit = form?.unit ?? data.unit;
+  let bindUserId = form?.boundUserId ?? (data.boundUserId != null ? String(data.boundUserId) : '');
 </script>
 
 <section class="unitPage">
   <div class="card">
-    <p class="eyebrow">Device Unit</p>
-    <h1>裝置單位設定</h1>
-    <p class="subtitle">調整指定裝置的單位分類</p>
+    <p class="eyebrow">Device Settings</p>
+    <h1>裝置設定</h1>
+    <p class="subtitle">調整裝置顯示名稱、單位與綁定帳號。</p>
 
     <div class="deviceId">
       裝置 ID：<strong>{data.deviceId}</strong>
     </div>
 
+    {#if form?.error}
+      <p class="error">{form.error}</p>
+    {/if}
+
     <form class="form" method="POST">
       <label>
+        裝置名稱
+        <input
+          name="displayName"
+          bind:value={displayName}
+          maxlength="40"
+          placeholder="例如：小明"
+        />
+      </label>
+
+      <label>
         單位
-        <select name="unit" bind:value={data.unit}>
+        <select name="unit" bind:value={unit}>
           {#each data.units as u}
             <option value={u}>{u}</option>
           {/each}
@@ -30,18 +58,18 @@
 
       <label>
         綁定帳號
-        <select name="bindUserId" bind:value={data.boundUserId}>
-          <option value="">未綁定</option>
+        <select name="bindUserId" bind:value={bindUserId}>
+          <option value="">不綁定</option>
           {#each data.users as u}
             <option value={u.id}>{u.username}</option>
           {/each}
         </select>
       </label>
 
-      <button class="primary" type="submit">儲存</button>
+      <button class="primary" type="submit">儲存設定</button>
     </form>
 
-    <p class="hint">儲存後會回到裝置詳情頁</p>
+    <p class="hint">裝置名稱留白時，前台會直接顯示原始裝置 ID。</p>
   </div>
 </section>
 
@@ -96,6 +124,15 @@
     font-family: "IBM Plex Sans", "Noto Sans TC", sans-serif;
   }
 
+  .error{
+    margin: 0 0 14px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: rgba(220, 38, 38, 0.1);
+    color: #991b1b;
+    text-align: left;
+  }
+
   .form{
     display: grid;
     gap: 12px;
@@ -110,6 +147,7 @@
     font-family: "IBM Plex Sans", "Noto Sans TC", sans-serif;
   }
 
+  input,
   select{
     padding: 10px 12px;
     border-radius: 10px;
@@ -118,6 +156,7 @@
     font-size: 14px;
   }
 
+  input:focus,
   select:focus{
     outline: 2px solid rgba(24, 183, 164, 0.4);
     border-color: rgba(24, 183, 164, 0.5);

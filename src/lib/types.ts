@@ -1,6 +1,7 @@
 // src/lib/types.ts
 export type DeviceTelemetry = {
   deviceId: string;
+  displayName?: string;
   online: boolean;
   battery: number; // 0~100
   charging?: boolean;

@@ -28,7 +28,7 @@
   }
 
   function unitOf(d: DeviceTelemetry) {
-    return d.sos ? '待救者' : (d as { unit?: string }).unit ?? '登山者';
+    return (d as { unit?: string }).unit ?? '登山者';
   }
 
   const UNIT_COLORS: Record<string, string> = {

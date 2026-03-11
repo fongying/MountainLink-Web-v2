@@ -49,7 +49,9 @@
   };
 
   const fmtTime = (ms: number) => new Date(ms).toLocaleString();
-  const unitOf = (d: DeviceTelemetry) => d.sos ? '待救者' : (d as { unit?: string }).unit ?? '登山者';
+  const unitOf = (d: DeviceTelemetry) => (d as { unit?: string }).unit ?? '登山者';
+  const deviceTitle = (d: DeviceTelemetry) => d.displayName?.trim() || d.deviceId;
+  const deviceSubtitle = (d: DeviceTelemetry) => (d.displayName?.trim() ? `（${d.deviceId}）` : '');
   const batteryText = (d: DeviceTelemetry) => d.charging ? `${d.battery}%（充電中）` : `${d.battery}%`;
 
   function severityText(level: AlertItem['severity']) {
@@ -358,7 +360,7 @@
         {#each devices as d (d.deviceId)}
           <a class="deviceCard" href={`/devices/${encodeURIComponent(d.deviceId)}`}>
             <div class="deviceTop">
-              <strong>{d.deviceId}</strong>
+              <strong>{deviceTitle(d)}</strong>
               <span class={`state ${d.online ? 'state-on' : 'state-off'}`}>
                 {#if d.online}Online{:else}Offline{/if}
               </span>
@@ -762,6 +764,12 @@
     justify-content: space-between;
     align-items: center;
     font-family: "Space Grotesk", "Noto Sans TC", sans-serif;
+  }
+
+  .deviceIdLine{
+    margin: -4px 0 0;
+    font-size: 12px;
+    color: var(--muted);
   }
 
   .state{

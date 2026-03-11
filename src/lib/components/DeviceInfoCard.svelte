@@ -22,7 +22,9 @@
     return new Date(t).toLocaleString();
   }
 
-  $: unitText = device.sos ? '待救者' : (device as { unit?: string }).unit ?? '登山者';
+  $: unitText = (device as { unit?: string }).unit ?? '登山者';
+  $: displayTitle = device.displayName?.trim() || device.deviceId;
+  $: deviceIdText = device.displayName?.trim() ? device.deviceId : '';
   const UNIT_COLORS: Record<string, string> = {
     '登山者': '#16a34a',
     '待救者': '#dc2626',
@@ -50,7 +52,10 @@
 
 <div class="card">
   <div class="body">
-    <div class="title">{device.deviceId}</div>
+    <div class="title">{displayTitle}</div>
+    {#if deviceIdText}
+      <div class="deviceId">{deviceIdText}</div>
+    {/if}
 
     <div class="unitBadge">
       <span class={`unitIcon shape-${unitShape}`} style={`--unit-color:${unitColor};`}></span>
@@ -96,6 +101,12 @@
     font-weight: 800;
     font-size: 15px;
     margin-bottom: 6px;
+  }
+
+  .deviceId{
+    margin: -2px 0 8px;
+    font-size: 12px;
+    color: #667578;
   }
 
   .unitBadge{

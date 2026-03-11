@@ -205,6 +205,7 @@ function demoDevices(now = Date.now()): DeviceTelemetry[] {
   return [
     {
       deviceId: DEMO_DEVICE_IDS[0],
+      displayName: '小明',
       online: true,
       battery: 87,
       charging: false,
@@ -224,6 +225,7 @@ function demoDevices(now = Date.now()): DeviceTelemetry[] {
     },
     {
       deviceId: DEMO_DEVICE_IDS[1],
+      displayName: '小美（SOS示範）',
       online: true,
       battery: 63,
       charging: false,

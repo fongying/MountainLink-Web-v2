@@ -1,4 +1,5 @@
 import { listDeviceStates } from '$lib/server/device-telemetry';
+import { listDeviceLabels } from '$lib/server/device-labels';
 import { listDeviceUnits } from '$lib/server/device-units';
 import { getUnifiedHazardSnapshot } from '$lib/server/hazards';
 import { ensureHazardMonitorLoop } from '$lib/server/hazard-monitor';
@@ -11,6 +12,7 @@ export const GET = async ({ request, locals }: any) => {
 
   const url = new URL(request.url);
   const deviceIdFilter = url.searchParams.get('deviceId')?.trim() || null;
+  const labels = await listDeviceLabels();
   const units = await listDeviceUnits();
 
   const headers = {
@@ -34,6 +36,7 @@ export const GET = async ({ request, locals }: any) => {
       const sendTelemetrySnapshot = async () => {
         const devices = (await listDeviceStates()).map((device) => ({
           ...device,
+          displayName: labels.get(device.deviceId) ?? device.displayName,
           unit: units.get(device.deviceId) ?? device.unit
         }));
         const filtered = deviceIdFilter

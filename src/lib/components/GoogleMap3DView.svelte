@@ -68,7 +68,7 @@
   };
 
   function unitOf(d: DeviceTelemetry) {
-    return d.sos ? '待救者' : (d as any).unit ?? '登山者';
+    return (d as any).unit ?? '登山者';
   }
 
   function markerColor(d: DeviceTelemetry) {

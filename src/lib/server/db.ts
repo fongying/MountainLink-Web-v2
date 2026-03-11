@@ -68,6 +68,12 @@ db.serialize(() => {
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`);
 
+  db.run(`CREATE TABLE IF NOT EXISTS device_labels (
+    device_id TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+
   db.run(`CREATE TABLE IF NOT EXISTS earthquake_events (
     id TEXT PRIMARY KEY,
     origin_time TEXT NOT NULL,
@@ -124,6 +130,7 @@ db.serialize(() => {
   db.run(`CREATE INDEX IF NOT EXISTS idx_th_device_ts ON telemetry_history(device_id, ts DESC)`);
   db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_th_device_packet ON telemetry_history(device_id, packet_id) WHERE packet_id IS NOT NULL`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_device_bindings_user ON device_bindings(user_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_device_labels_name ON device_labels(display_name)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_device_units_unit ON device_units(unit)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_device_state_updated_at ON device_state(updated_at DESC)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)`);
