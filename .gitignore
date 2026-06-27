@@ -18,6 +18,19 @@ Thumbs.db
 !.env.example
 !.env.test
 
+# Runtime data
+/data/*.db
+/data/*.db-*
+/data/*.sqlite*
+*.log
+
+# Local tooling and generated workspaces
+/.codex-dev-server.mjs
+/.tmp-*/
+/tmp/
+/.codex/skills/**/__pycache__/
+/nvidia-model-list.txt
+
 # Vite
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*

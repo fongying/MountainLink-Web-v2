@@ -1,4 +1,4 @@
-﻿<script lang="ts">
+<script lang="ts">
   import { onMount } from 'svelte';
   import type { DeviceTelemetry, MLinkSseEvent } from '$lib/types';
   import { connectSse } from '$lib/client/sse';
@@ -30,58 +30,23 @@
 
   let sseStatus: 'open' | 'error' | 'connecting' = 'connecting';
   let current: DeviceTelemetry | null = data.device ?? null;
-
   let timeSeries: number[] = [];
   let hrSeries: number[] = [];
   let batSeries: number[] = [];
-  let leftCardEl: HTMLDivElement | null = null;
-  let chartW = 520; // 預設值，避免 SSR/HMR 初始為 0
-
+  let chartW = 640;
   let logs: string[] = [];
+
   const fmtTime = (ms: number) => new Date(ms).toLocaleString();
   const displayTitle = (d: DeviceTelemetry | null) => d?.displayName?.trim() || d?.deviceId || data.deviceId;
-
-  function pushLog(msg: string) {
-    // 少拷貝：頭插仍需新陣列，但固定長度
-    logs = [msg, ...logs];
-    if (logs.length > MAX_LOGS) logs = logs.slice(0, MAX_LOGS);
-  }
+  const unitOf = (d: DeviceTelemetry | null) => d?.unit?.trim() || '未分類';
 
   function trimTail<T>(arr: T[]) {
-    // 比 slice + spread 省
     if (arr.length > MAX_POINTS) arr.splice(0, arr.length - MAX_POINTS);
   }
 
-  function initFromHistory(history: HistoryRow[]) {
-    const sliced = history.length > MAX_POINTS ? history.slice(-MAX_POINTS) : history;
-
-    timeSeries = sliced.map((r) => r.ts);
-
-    let lastHr: number | null = null;
-    let lastBat: number | null = null;
-
-    hrSeries = [];
-    batSeries = [];
-
-    for (const r of sliced) {
-      if (r.hr != null) lastHr = r.hr;
-      if (r.battery != null) lastBat = r.battery;
-      hrSeries.push(lastHr ?? NaN);
-      batSeries.push(lastBat ?? NaN);
-    }
-
-    hrSeries = backfillNaN(hrSeries, 60);     // 沒資料時先用 60bpm 當顯示用預設
-    batSeries = backfillNaN(batSeries, 100);  // 沒資料時先用 100% 當顯示用預設
-  }
-
-  // 初始化一次
-  initFromHistory(data.history);
-
   function backfillNaN(series: number[], fallback: number) {
-    // 找第一個有效值
     const first = series.find((v) => Number.isFinite(v));
-    const fill = (first ?? fallback);
-
+    const fill = first ?? fallback;
     return series.map((v) => (Number.isFinite(v) ? v : fill));
   }
 
@@ -90,30 +55,90 @@
     return series.map((v) => (Number.isFinite(v) ? v : value));
   }
 
+  function initFromHistory(history: HistoryRow[]) {
+    const sliced = history.length > MAX_POINTS ? history.slice(-MAX_POINTS) : history;
+    timeSeries = sliced.map((r) => r.ts);
+
+    let lastHr: number | null = null;
+    let lastBat: number | null = null;
+    hrSeries = [];
+    batSeries = [];
+
+    for (const row of sliced) {
+      if (row.hr != null) lastHr = row.hr;
+      if (row.battery != null) lastBat = row.battery;
+      hrSeries.push(lastHr ?? NaN);
+      batSeries.push(lastBat ?? NaN);
+    }
+
+    hrSeries = backfillNaN(hrSeries, current?.hr ?? 60);
+    batSeries = backfillNaN(batSeries, current?.battery ?? 100);
+  }
+
+  initFromHistory(data.history);
+
+  function physiologicalAbnormalities(device: DeviceTelemetry | null) {
+    if (!device) return [];
+    const items: string[] = [];
+    if (device.hr != null && (device.hr > 150 || device.hr < 50)) items.push(`HR ${device.hr} bpm`);
+    if (device.spo2 != null && device.spo2 < 90) items.push(`SpO2 ${device.spo2}%`);
+    if (device.bt != null && (device.bt > 41 || device.bt < 32)) items.push(`BT ${device.bt}°C`);
+    if (device.bpHi != null && (device.bpHi > 200 || device.bpHi < 90)) items.push(`SBP ${device.bpHi} mmHg`);
+    return items;
+  }
+
+  function deviceStatusLabel(device: DeviceTelemetry | null) {
+    if (!device) return '未知';
+    if (device.sos) return 'SOS';
+    if (!device.online) return '離線';
+    if (physiologicalAbnormalities(device).length > 0) return '生理異常';
+    if ((device.battery ?? 0) <= 20) return '低電量';
+    return '正常';
+  }
+
+  function deviceStatusClass(device: DeviceTelemetry | null) {
+    if (!device) return 'idle';
+    if (device.sos) return 'danger';
+    if (!device.online) return 'offline';
+    if (physiologicalAbnormalities(device).length > 0) return 'risk';
+    if ((device.battery ?? 0) <= 20) return 'warn';
+    return 'ok';
+  }
+
+  function signalLabel(device: DeviceTelemetry | null) {
+    if (!device?.online) return '無連線';
+    if (device.rssi == null) return '未知';
+    if (device.rssi >= -85) return '良好';
+    if (device.rssi >= -100) return '偏弱';
+    return '弱訊號';
+  }
+
+  function coordinateText(device: DeviceTelemetry | null) {
+    if (!device || device.lat == null || device.lon == null) return '無定位資料';
+    const alt = device.alt == null ? '' : ` / ${Math.round(device.alt)}m`;
+    return `${device.lat.toFixed(6)}, ${device.lon.toFixed(6)}${alt}`;
+  }
+
+  function pushLog(msg: string) {
+    logs = [msg, ...logs].slice(0, MAX_LOGS);
+  }
+
   function applyTelemetry(dev: DeviceTelemetry) {
-    // 避免亂序覆蓋
     if (current?.updatedAt != null && dev.updatedAt != null && dev.updatedAt < current.updatedAt) return;
 
     current = { ...current, ...dev };
-
     const t = dev.updatedAt ?? Date.now();
-
-    // 時間序列
     timeSeries.push(t);
     trimTail(timeSeries);
 
-    // 這裡就是 prevHr / prevBat 的來源：取「上一個點」
     const prevHr = hrSeries.length ? hrSeries[hrSeries.length - 1] : NaN;
     const prevBat = batSeries.length ? batSeries[batSeries.length - 1] : NaN;
-
-    // 缺值沿用前值（確保序列等長）
     const nextHr = dev.hr != null ? dev.hr : prevHr;
     const nextBat = dev.battery != null ? dev.battery : prevBat;
 
     hrSeries.push(nextHr);
     batSeries.push(nextBat);
 
-    // 一旦收到有效值，就把舊 NaN 一次補齊（否則折線會整條消失）
     if (Number.isFinite(nextHr)) hrSeries = fillAllNaN(hrSeries, nextHr);
     if (Number.isFinite(nextBat)) batSeries = fillAllNaN(batSeries, nextBat);
 
@@ -125,11 +150,8 @@
     if (evt.type === 'telemetry') {
       const target = evt.devices.find((d) => d.deviceId === data.deviceId);
       if (!target) return;
-
       applyTelemetry(target);
-      pushLog(
-        `[telemetry] ${fmtTime(target.updatedAt)} hr=${target.hr ?? '—'} bat=${target.battery ?? '—'} sos=${target.sos ? 'Y' : 'N'}`
-      );
+      pushLog(`[telemetry] ${fmtTime(target.updatedAt)} HR ${target.hr ?? '-'} / Bat ${target.battery ?? '-'} / SOS ${target.sos ? 'ON' : 'OFF'}`);
       return;
     }
 
@@ -140,23 +162,19 @@
         battery: current?.battery ?? 0,
         updatedAt: evt.updatedAt
       });
-      pushLog(`[online] ${fmtTime(evt.updatedAt)} online=${evt.online}`);
-      return;
+      pushLog(`[online] ${fmtTime(evt.updatedAt)} ${evt.online ? 'Online' : 'Offline'}`);
     }
   }
 
   onMount(() => {
     let disposed = false;
-
     const disconnect = connectSse(
       `/api/stream?deviceId=${encodeURIComponent(data.deviceId)}`,
       (evt) => {
-        if (disposed) return;
-        handleEvent(evt);
+        if (!disposed) handleEvent(evt);
       },
       (status) => {
-        if (disposed) return;
-        sseStatus = status;
+        if (!disposed) sseStatus = status;
       }
     );
 
@@ -166,193 +184,190 @@
     };
   });
 
-  $: sparkW = Math.max(260, (chartW || 0) - 24); // 24 ≈ 左右 padding 12+12
+  $: abnormalities = physiologicalAbnormalities(current);
+  $: sparkW = Math.max(280, (chartW || 0) - 28);
+  $: lastUpdateText = current ? fmtTime(current.updatedAt) : '尚無資料';
 </script>
 
-<div class="devicePage">
-  <header class="hero">
-    <div class="heroLeft">
-      <p class="eyebrow">Device</p>
-      <h1>裝置詳情</h1>
-      <p class="deviceLine">
-        <span>裝置</span>
-        <strong>{displayTitle(current ?? data.device)}</strong>
-      </p>
-      <p class="deviceIdLine">ID：{data.deviceId}</p>
+<svelte:head>
+  <title>{displayTitle(current ?? data.device)} | MountainLink 裝置詳情</title>
+</svelte:head>
+
+<section class="deviceDetailPage">
+  <header class="deviceHeader">
+    <div class="identityBlock">
+      <p class="eyebrow">Device Detail</p>
+      <h1>{displayTitle(current ?? data.device)}</h1>
+      <div class="identityMeta">
+        <span>{data.deviceId}</span>
+        <span>{unitOf(current ?? data.device)}</span>
+        <span>更新 {lastUpdateText}</span>
+      </div>
     </div>
-    <div class="heroRight">
-      <div class="heroActions">
-        <a class="backLink" href="/dashboard">← 回 Dashboard</a>
-        {#if data.user?.is_admin}
-          <a class="backLink" href={`/devices/${encodeURIComponent(data.deviceId)}/unit`}>調整單位</a>
-        {/if}
-      </div>
-      <div class="chipRow">
-        <span class={`chip ${sseStatus === 'open' ? 'chip-ok' : sseStatus === 'error' ? 'chip-warn' : 'chip-idle'}`}>
-          SSE：
-          {#if sseStatus === 'open'}
-            已連線
-          {:else if sseStatus === 'error'}
-            異常（重連中）
-          {:else}
-            連線中
-          {/if}
-        </span>
-        <span class={`chip ${current?.online ? 'chip-ok' : current ? 'chip-off' : 'chip-idle'}`}>
-          裝置：
-          {#if current}
-            {#if current.online}Online{:else}Offline{/if}
-          {:else}
-            未知
-          {/if}
-        </span>
-      </div>
-      <p class="heroTime">最後更新：{current ? fmtTime(current.updatedAt) : '—'}</p>
+    <div class="headerActions">
+      <a href="/devices">裝置列表</a>
+      <a href="/dashboard">回監控中心</a>
+      {#if data.user?.is_admin}
+        <a href={`/devices/${encodeURIComponent(data.deviceId)}/unit`}>調整單位</a>
+      {/if}
     </div>
   </header>
 
-  <section class="card mapCard">
-    <div class="cardHeader">
-      <div>
-        <h2>位置地圖</h2>
-        <p class="muted">鎖定視角 · Terrain</p>
+  <main class="detailGrid">
+    <section class="panel mapPanel">
+      <div class="panelHeader">
+        <div>
+          <h2>位置地圖</h2>
+          <p>鎖定裝置位置與地形視角</p>
+        </div>
+        <span>Zoom 16</span>
       </div>
-      <span class="cardTag">Zoom 16</span>
-    </div>
-    {#if current || data.device}
-      <div class="mapFrame">
-        <DeviceMap2D
-          device={(current ?? data.device) as any}
-          height={360}
-          zoom={16}
-          lockView={true}
-          showTerrain={true}
-        />
+      {#if current || data.device}
+        <div class="mapFrame">
+          <DeviceMap2D device={(current ?? data.device) as any} height="100%" zoom={16} lockView={true} showTerrain={true} />
+        </div>
+      {:else}
+        <p class="empty">尚未取得裝置定位資料。</p>
+      {/if}
+      <div class="locationBar">
+        <b>座標</b>
+        <span>{coordinateText(current)}</span>
       </div>
-    {:else}
-      <p class="empty">地圖載入中…（尚未取得裝置資料）</p>
-    {/if}
-  </section>
+    </section>
 
-  <div class="grid">
-    <section class="card statsCard">
-      <div class="cardHeader">
+    <aside class="panel telemetryPanel">
+      <div class="panelHeader">
         <div>
           <h2>即時狀態</h2>
-          <p class="muted">裝置指標與連線狀態</p>
+          <p>生命徵象、通訊與裝置資料</p>
         </div>
-        {#if current?.sos}
-          <span class="alertPill">🚨 SOS</span>
-        {/if}
+        <span class={`livePill ${sseStatus}`}>{sseStatus === 'open' ? 'Live' : sseStatus === 'error' ? 'Retry' : 'Wait'}</span>
       </div>
 
       {#if current}
-        <div class="kv">
-          <div class="kvLabel">狀態</div>
-          <div class="kvValue">
-            <span class={`statusDot ${current.online ? 'dot-online' : 'dot-offline'}`}></span>
-            {#if current.online}Online{:else}Offline{/if}
+        <div class="compactStatusGrid" aria-label="裝置狀態摘要">
+          <div class={`statusMetric ${deviceStatusClass(current)}`}>
+            <span>狀態</span>
+            <strong>{deviceStatusLabel(current)}</strong>
+            <small>{current.online ? 'Online' : 'Offline'}</small>
           </div>
-
-          <div class="kvLabel">單位</div>
-          <div class="kvValue">{(current as any)?.unit ?? '登山者'}</div>
-
-          <div class="kvLabel">電量</div>
-          <div class="kvValue">
-            {current.battery}%{#if current.charging}（充電中）{/if}
-            {#if current.battery <= 15}
-              <span class="warn">低電量</span>
-            {/if}
+          <div class={`statusMetric ${(current.battery ?? 0) <= 20 ? 'warn' : 'ok'}`}>
+            <span>電量</span>
+            <strong>{current.battery ?? '—'}%</strong>
+            <small>{current.charging ? '充電中' : '一般供電'}</small>
           </div>
-
-          <div class="kvLabel">心率</div>
-          <div class="kvValue">{current.hr ?? '—'} bpm</div>
-
-          <div class="kvLabel">血氧</div>
-          <div class="kvValue">{current.spo2 ?? '—'}%</div>
-
-          <div class="kvLabel">血壓</div>
-          <div class="kvValue">{current.bpHi ?? '—'} / {current.bpLo ?? '—'}</div>
-
-          <div class="kvLabel">體溫</div>
-          <div class="kvValue">{current.bt ?? '—'}°C</div>
-
-          <div class="kvLabel">座標</div>
-          <div class="kvValue mono">
-            {current.lat ?? '—'}, {current.lon ?? '—'} {#if current.alt != null}(alt {current.alt}m){/if}
+          <div class={`statusMetric ${abnormalities.some((item) => item.includes('心率')) ? 'danger' : 'ok'}`}>
+            <span>心率</span>
+            <strong>{current.hr ?? '—'} <small>bpm</small></strong>
+            <small>即時生命徵象</small>
           </div>
-
-          <div class="kvLabel">訊號</div>
-          <div class="kvValue">RSSI {current.rssi ?? '—'} / SNR {current.snr ?? '—'}</div>
-
-          <div class="kvLabel">最後更新</div>
-          <div class="kvValue">{fmtTime(current.updatedAt)}</div>
+          <div class="statusMetric signal">
+            <span>訊號</span>
+            <strong>{signalLabel(current)}</strong>
+            <small>RSSI {current.rssi ?? '—'} / SNR {current.snr ?? '—'}</small>
+          </div>
         </div>
 
-        {#if current.sos}
-          <div class="sosBanner">🚨 SOS 觸發中</div>
+        <div class="vitalGrid">
+          <div>
+            <span>血氧</span>
+            <strong>{current.spo2 ?? '—'}%</strong>
+          </div>
+          <div>
+            <span>血壓</span>
+            <strong>{current.bpHi ?? '—'} / {current.bpLo ?? '—'}</strong>
+          </div>
+          <div>
+            <span>體溫</span>
+            <strong>{current.bt ?? '—'}°C</strong>
+          </div>
+          <div>
+            <span>海拔</span>
+            <strong>{current.alt ?? '—'}m</strong>
+          </div>
+          <div>
+            <span>封包</span>
+            <strong>{current.packetId ?? '—'}</strong>
+          </div>
+          <div>
+            <span>頻道</span>
+            <strong>{current.channel ?? '—'}</strong>
+          </div>
+        </div>
+
+        <div class="detailList">
+          <div><span>Sender</span><b>{current.sender ?? '—'}</b></div>
+          <div><span>Hop</span><b>{current.hopsAway ?? '—'} / {current.hopStart ?? '—'}</b></div>
+          <div><span>最後更新</span><b>{fmtTime(current.updatedAt)}</b></div>
+        </div>
+
+        {#if abnormalities.length}
+          <div class="riskBox">
+            <b>生理警示</b>
+            <p>{abnormalities.join('、')}</p>
+          </div>
+        {:else}
+          <div class="okBox">
+            <b>生理狀態</b>
+            <p>目前未偵測到 HR、SpO2、體溫或收縮壓異常。</p>
+          </div>
         {/if}
       {:else}
-        <p class="empty">尚未收到此裝置的即時資料…（等待 SSE）</p>
+        <p class="empty">尚未收到此裝置的即時資料。</p>
       {/if}
-    </section>
+    </aside>
 
-    <section class="card chartCard" bind:clientWidth={chartW}>
-      <div class="cardHeader">
+    <section class="panel chartPanel" bind:clientWidth={chartW}>
+      <div class="panelHeader">
         <div>
-          <h2>生命跡象</h2>
-          <p class="muted">近 {MAX_POINTS} 點的即時趨勢</p>
+          <h2>生命跡象趨勢</h2>
+          <p>近 {MAX_POINTS} 點資料，保留最近回報值</p>
         </div>
-        <span class="cardTag">Live</span>
+        <span>Live Trend</span>
       </div>
-
       {#if current}
         <div class="chartBlock">
           <div class="chartHeader">
-            <strong>心率（bpm）</strong>
-            <span class="metricBadge">目前：{current.hr ?? '—'}</span>
+            <strong>心率</strong>
+            <span>{current.hr ?? '—'} bpm</span>
           </div>
           <Sparkline
             values={hrSeries}
             times={timeSeries}
             width={sparkW}
-            height={110}
+            height={112}
             min={40}
             max={180}
             tickEverySeconds={10}
             bands={[
-              { from: 50, to: 60,  color: '#22c55e', opacity: 0.12, label: '偏低' },
+              { from: 50, to: 60, color: '#22c55e', opacity: 0.12, label: '偏低' },
               { from: 60, to: 120, color: '#eab308', opacity: 0.12, label: '正常' },
               { from: 120, to: 160, color: '#ef4444', opacity: 0.12, label: '偏高' }
             ]}
           />
         </div>
-
-        <div class="divider"></div>
-
         <div class="chartBlock">
           <div class="chartHeader">
-            <strong>電量（%）</strong>
-            <span class="metricBadge">目前：{current.battery ?? '—'}%</span>
+            <strong>電量</strong>
+            <span>{current.battery ?? '—'}%</span>
           </div>
           <Sparkline values={batSeries} times={timeSeries} width={sparkW} height={100} min={0} max={100} tickEverySeconds={10} />
         </div>
       {:else}
-        <p class="empty">尚未收到圖表資料…</p>
+        <p class="empty">尚未收到圖表資料。</p>
       {/if}
     </section>
 
-    <section class="card logCard">
-      <div class="cardHeader">
+    <section class="panel logPanel">
+      <div class="panelHeader">
         <div>
-          <h2>即時事件紀錄</h2>
-          <p class="muted">最新 {MAX_LOGS} 筆訊息</p>
+          <h2>即時事件</h2>
+          <p>最新 {MAX_LOGS} 筆 SSE 訊息</p>
         </div>
-        <span class="cardTag">SSE</span>
+        <span>SSE</span>
       </div>
-
       {#if logs.length === 0}
-        <p class="empty">尚無事件</p>
+        <p class="empty">尚無事件。</p>
       {:else}
         <ul class="logs">
           {#each logs as line}
@@ -361,368 +376,428 @@
         </ul>
       {/if}
     </section>
-  </div>
-</div>
+  </main>
+</section>
 
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
-
-  .devicePage{
-    --ink: #0b1b1e;
-    --muted: #53656a;
-    --accent: #ff6b4a;
-    --accent-2: #18b7a4;
-    --card: rgba(255, 255, 255, 0.92);
-    --stroke: rgba(12, 40, 46, 0.12);
-    --shadow: 0 14px 38px rgba(10, 22, 26, 0.12);
-    position: relative;
-    padding: 24px 20px 44px;
-    border-radius: 22px;
+  .deviceDetailPage{
+    --bg: #020617;
+    --panel: #081318;
+    --panel-2: #0d1d24;
+    --line: rgba(148, 163, 184, 0.18);
+    --text: #f8fafc;
+    --muted: #9fb0b8;
+    --green: #10b981;
+    --blue: #60a5fa;
+    --amber: #f59e0b;
+    --red: #ef4444;
+    min-height: calc(100vh - 120px);
+    border-radius: 18px;
+    padding: 22px;
     background:
-      radial-gradient(1200px 340px at -10% -20%, rgba(24, 183, 164, 0.18), transparent 60%),
-      radial-gradient(900px 300px at 110% 0%, rgba(255, 107, 74, 0.18), transparent 55%),
-      linear-gradient(180deg, #f7fbfb 0%, #eef3f2 100%);
-    color: var(--ink);
-    font-family: "IBM Plex Sans", "Noto Sans TC", sans-serif;
-    overflow: hidden;
+      radial-gradient(900px 280px at 8% -20%, rgba(16, 185, 129, 0.13), transparent 60%),
+      radial-gradient(700px 260px at 100% 0%, rgba(96, 165, 250, 0.1), transparent 55%),
+      var(--bg);
+    color: var(--text);
+    font-family: "Fira Sans", "Noto Sans TC", sans-serif;
   }
 
-  .devicePage::after{
-    content: "";
-    position: absolute;
-    inset: 24px 12px auto auto;
-    width: 220px;
-    height: 220px;
-    background:
-      radial-gradient(circle at 30% 30%, rgba(255, 107, 74, 0.28), transparent 55%),
-      radial-gradient(circle at 70% 70%, rgba(24, 183, 164, 0.2), transparent 55%);
-    opacity: 0.8;
-    pointer-events: none;
-  }
-
-  .devicePage > *{
-    position: relative;
-    z-index: 1;
-  }
-
-  .hero{
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-end;
+  .deviceHeader{
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 18px;
-    margin-bottom: 18px;
-  }
-
-  .heroLeft h1{
-    margin: 4px 0 6px;
-    font-family: "Space Grotesk", "Noto Sans TC", sans-serif;
-    font-size: 34px;
-    letter-spacing: -0.02em;
+    align-items: start;
+    margin-bottom: 14px;
   }
 
   .eyebrow{
-    margin: 0;
-    font-size: 12px;
-    letter-spacing: 0.32em;
+    margin: 0 0 4px;
+    color: var(--green);
+    font-family: "Fira Code", monospace;
+    font-size: 11px;
+    letter-spacing: 0.22em;
     text-transform: uppercase;
-    color: var(--muted);
   }
 
-  .deviceLine{
+  h1,
+  h2,
+  p{
     margin: 0;
-    font-size: 15px;
-    color: var(--muted);
-  }
-  .deviceLine strong{
-    margin-left: 6px;
-    font-weight: 700;
-    color: var(--ink);
   }
 
-  .deviceIdLine{
-    margin: 4px 0 0;
-    font-size: 12px;
-    color: var(--muted);
+  h1{
+    overflow-wrap: anywhere;
+    font-size: 30px;
+    line-height: 1.1;
+    letter-spacing: 0;
   }
 
-  .heroRight{
+  .identityMeta,
+  .headerActions{
     display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 8px;
-    text-align: right;
-  }
-
-  .heroActions{
-    display: flex;
-    gap: 8px;
     flex-wrap: wrap;
-    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 10px;
   }
 
-  .backLink{
-    font-size: 13px;
-    text-decoration: none;
-    color: var(--ink);
-    border: 1px solid var(--stroke);
+  .identityMeta span,
+  .headerActions a,
+  .panelHeader > span,
+  .livePill{
+    border: 1px solid var(--line);
+    border-radius: 999px;
     padding: 6px 10px;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.7);
-  }
-  .backLink:hover{ border-color: rgba(12, 40, 46, 0.25); }
-
-  .chipRow{
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-  }
-
-  .chip{
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 10px;
-    border-radius: 999px;
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    border: 1px solid transparent;
-    background: rgba(255, 255, 255, 0.75);
-  }
-  .chip-ok{
-    color: #0b665d;
-    border-color: rgba(24, 183, 164, 0.4);
-    background: rgba(24, 183, 164, 0.12);
-  }
-  .chip-warn{
-    color: #8a360e;
-    border-color: rgba(255, 107, 74, 0.5);
-    background: rgba(255, 107, 74, 0.12);
-  }
-  .chip-off{
-    color: #384548;
-    border-color: rgba(56, 69, 72, 0.25);
-    background: rgba(56, 69, 72, 0.08);
-  }
-  .chip-idle{
-    color: #4f5b5e;
-    border-color: rgba(79, 91, 94, 0.2);
-    background: rgba(79, 91, 94, 0.08);
-  }
-
-  .heroTime{
-    margin: 0;
-    font-size: 12px;
+    background: rgba(255, 255, 255, 0.04);
     color: var(--muted);
+    font-family: "Fira Code", monospace;
+    font-size: 12px;
+    text-decoration: none;
   }
 
-  .grid{
-    display: grid;
-    grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
-    grid-template-areas:
-      "stats logs"
-      "charts logs";
-    gap: 16px;
-    align-items: start;
-    margin-top: 18px;
-  }
-
-  .card{
-    min-width: 0;
-    border: 1px solid var(--stroke);
-    border-radius: 16px;
-    padding: 16px;
-    background: var(--card);
-    box-shadow: var(--shadow);
-    overflow: hidden;
-    font-family: "IBM Plex Sans", "Noto Sans TC", sans-serif;
-  }
-
-  .mapCard{ margin-top: 8px; }
-
-  .statsCard{ grid-area: stats; }
-  .chartCard{ grid-area: charts; }
-  .logCard{
-    grid-area: logs;
-    background: #0f1a1c;
-    color: #e6f1f1;
-    border-color: rgba(255, 255, 255, 0.08);
-  }
-
-  .cardHeader{
-    display: flex;
+  .headerActions{
     align-items: center;
+    align-self: start;
+    justify-content: flex-end;
+    margin-top: 0;
+  }
+
+  .headerActions a{
+    color: var(--text);
+    cursor: pointer;
+    transition: border-color 180ms ease, background 180ms ease;
+  }
+
+  .headerActions a:hover,
+  .headerActions a:focus-visible{
+    border-color: rgba(96, 165, 250, 0.5);
+    background: rgba(96, 165, 250, 0.1);
+    outline: none;
+  }
+
+  .detailGrid{
+    display: grid;
+    grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.75fr);
+    gap: 12px;
+    align-items: stretch;
+  }
+
+  .panel{
+    min-width: 0;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px;
+    background: rgba(8, 19, 24, 0.94);
+  }
+
+  .panelHeader{
+    display: flex;
+    align-items: flex-start;
     justify-content: space-between;
     gap: 10px;
     margin-bottom: 12px;
   }
 
-  .cardHeader h2{
-    margin: 0;
+  .panelHeader h2{
     font-size: 20px;
-    font-family: "Space Grotesk", "Noto Sans TC", sans-serif;
+    line-height: 1.2;
   }
 
-  .cardHeader .muted{ margin: 4px 0 0; }
-
-  .cardTag{
-    font-size: 12px;
-    padding: 4px 10px;
-    border-radius: 999px;
-    border: 1px solid var(--stroke);
+  .panelHeader p{
+    margin-top: 4px;
     color: var(--muted);
-    background: rgba(255, 255, 255, 0.7);
+    font-size: 13px;
   }
 
-  .logCard .cardTag{
-    border-color: rgba(255, 255, 255, 0.2);
-    color: #cbd7d7;
-    background: rgba(255, 255, 255, 0.08);
+  .livePill.open{
+    border-color: rgba(16, 185, 129, 0.46);
+    color: #a7f3d0;
+    background: rgba(16, 185, 129, 0.09);
+  }
+
+  .livePill.error{
+    border-color: rgba(239, 68, 68, 0.4);
+    color: #fecaca;
   }
 
   .mapFrame{
-    border-radius: 14px;
+    flex: 1 1 auto;
+    min-height: 420px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
     overflow: hidden;
-    border: 1px solid rgba(12, 40, 46, 0.12);
+    background: #111827;
   }
 
-  .muted{ color: var(--muted); font-size: 13px; }
+  .mapPanel{
+    display: flex;
+    flex-direction: column;
+  }
 
-  .kv{
+  .locationBar{
     display: grid;
-    grid-template-columns: 130px 1fr;
-    gap: 10px 14px;
-  }
-  .kvLabel{
-    font-size: 12px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--muted);
-  }
-  .kvValue{ font-weight: 600; }
-  .mono{ font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace; }
-
-  .statusDot{
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    margin-right: 6px;
-    background: #8a8a8a;
-  }
-  .dot-online{ background: #17c3b2; box-shadow: 0 0 10px rgba(23, 195, 178, 0.6); }
-  .dot-offline{ background: #6b7a7f; }
-
-  .warn{
-    margin-left: 6px;
-    font-size: 12px;
-    padding: 2px 6px;
-    border-radius: 999px;
-    color: #8a360e;
-    background: rgba(255, 107, 74, 0.16);
-  }
-
-  .sosBanner{
-    margin-top: 12px;
-    padding: 10px 12px;
-    border-radius: 12px;
-    background: rgba(255, 68, 68, 0.12);
-    border: 1px solid rgba(255, 68, 68, 0.4);
-    color: #a1001d;
-    font-weight: 700;
-  }
-
-  .alertPill{
-    display: inline-flex;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 10px;
     align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
-    border-radius: 999px;
+    margin-top: 10px;
+    border: 1px solid rgba(96, 165, 250, 0.16);
+    border-radius: 8px;
+    padding: 9px 10px;
+    background: rgba(96, 165, 250, 0.06);
+  }
+
+  .locationBar span{
+    min-width: 0;
+    overflow: hidden;
+    color: var(--muted);
+    font-family: "Fira Code", monospace;
     font-size: 12px;
-    font-weight: 700;
-    color: #a1001d;
-    border: 1px solid rgba(255, 68, 68, 0.45);
-    background: rgba(255, 68, 68, 0.14);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .vitalGrid{
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .compactStatusGrid{
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .statusMetric{
+    min-width: 0;
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    border-left: 3px solid var(--blue);
+    border-radius: 8px;
+    padding: 9px 10px;
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .statusMetric.ok{
+    border-left-color: var(--green);
+  }
+
+  .statusMetric.danger{
+    border-left-color: var(--red);
+    background: rgba(127, 29, 29, 0.2);
+  }
+
+  .statusMetric.risk{
+    border-left-color: #a78bfa;
+  }
+
+  .statusMetric.warn{
+    border-left-color: var(--amber);
+  }
+
+  .statusMetric.offline,
+  .statusMetric.idle{
+    border-left-color: #64748b;
+  }
+
+  .statusMetric > span,
+  .statusMetric > small{
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--muted);
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .statusMetric > strong{
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    margin: 3px 0;
+    font-family: "Fira Code", monospace;
+    font-size: 18px;
+    line-height: 1.1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .statusMetric > strong small{
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 500;
+  }
+
+  .vitalGrid div,
+  .detailList div,
+  .riskBox,
+  .okBox{
+    min-width: 0;
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    border-radius: 8px;
+    padding: 9px;
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .vitalGrid span,
+  .detailList span{
+    display: block;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .vitalGrid strong{
+    display: block;
+    margin-top: 4px;
+    overflow: hidden;
+    font-family: "Fira Code", monospace;
+    font-size: 18px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .detailList{
+    display: grid;
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .detailList div{
+    display: grid;
+    grid-template-columns: 86px minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .detailList b{
+    min-width: 0;
+    overflow: hidden;
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .riskBox,
+  .okBox{
+    margin-top: 10px;
+  }
+
+  .riskBox{
+    border-color: rgba(239, 68, 68, 0.32);
+    background: rgba(127, 29, 29, 0.2);
+  }
+
+  .okBox{
+    border-color: rgba(16, 185, 129, 0.24);
+    background: rgba(16, 185, 129, 0.06);
+  }
+
+  .riskBox b,
+  .okBox b{
+    display: block;
+    margin-bottom: 5px;
+  }
+
+  .riskBox p,
+  .okBox p{
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  .chartPanel{
+    grid-column: 1 / 2;
+  }
+
+  .logPanel{
+    grid-column: 2 / 3;
   }
 
   .chartBlock{
-    margin-top: 8px;
     min-width: 0;
+    display: grid;
+    gap: 6px;
+    margin-top: 10px;
   }
+
+  .chartBlock + .chartBlock{
+    border-top: 1px solid rgba(148, 163, 184, 0.12);
+    padding-top: 12px;
+  }
+
   .chartHeader{
     display: flex;
     justify-content: space-between;
-    align-items: center;
-    margin-bottom: 6px;
-  }
-  .metricBadge{
-    font-size: 12px;
-    padding: 4px 8px;
-    border-radius: 999px;
-    background: rgba(24, 183, 164, 0.14);
-    color: #0b665d;
+    gap: 10px;
+    color: var(--muted);
+    font-size: 13px;
   }
 
-  .divider{
-    height: 1px;
-    margin: 14px 0;
-    background: rgba(12, 40, 46, 0.12);
+  .chartHeader strong{
+    color: var(--text);
   }
-
-  .logCard .muted{ color: #9fb0b4; }
 
   .logs{
+    display: grid;
+    max-height: 312px;
     margin: 0;
     padding: 0;
-    list-style: none;
-    max-height: 420px;
     overflow: auto;
-    font-size: 12px;
-    display: grid;
-    gap: 6px;
+    gap: 7px;
+    list-style: none;
   }
+
   .logs li{
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 10px;
-    padding: 8px 10px;
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    border-radius: 8px;
+    padding: 8px 9px;
+    background: rgba(255, 255, 255, 0.04);
   }
+
   .logs code{
     display: block;
     color: #d7efed;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     word-break: break-word;
+    font-size: 12px;
   }
 
   .empty{
-    margin: 0;
+    border: 1px dashed var(--line);
+    border-radius: 8px;
     padding: 12px;
-    border-radius: 12px;
-    background: rgba(12, 40, 46, 0.06);
     color: var(--muted);
-  }
-  .logCard .empty{
-    background: rgba(255, 255, 255, 0.08);
-    color: #a8b8bb;
+    font-size: 13px;
   }
 
-  @media (max-width: 1100px){
-    .grid{
+  @media (max-width: 1180px){
+    .detailGrid{
       grid-template-columns: 1fr;
-      grid-template-areas:
-        "stats"
-        "charts"
-        "logs";
     }
-    .logs{ max-height: 360px; }
+
+    .chartPanel,
+    .logPanel{
+      grid-column: auto;
+    }
+
   }
 
-  @media (max-width: 720px){
-    .devicePage{ padding: 18px 14px 32px; }
-    .hero{ flex-direction: column; align-items: flex-start; }
-    .heroRight{ align-items: flex-start; text-align: left; }
-    .chipRow{ justify-content: flex-start; }
+  @media (max-width: 760px){
+    .deviceDetailPage{
+      border-radius: 0;
+      padding: 16px;
+    }
+
+    .deviceHeader{
+      grid-template-columns: 1fr;
+    }
+
+    .headerActions{
+      justify-content: flex-start;
+    }
+
+    .vitalGrid{
+      grid-template-columns: 1fr;
+    }
   }
 </style>

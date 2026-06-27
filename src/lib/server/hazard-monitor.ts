@@ -1,5 +1,6 @@
 import { dispatchHazardItems } from '$lib/server/hazard-dispatch';
 import { getUnifiedHazardSnapshot } from '$lib/server/hazards';
+import { runAiRecommendationAnalysis, shouldRunAiAgentAutomatically } from '$lib/server/ai-agent';
 import { broadcastSse } from '$lib/server/stream';
 
 let loopStarted = false;
@@ -20,6 +21,9 @@ async function tick(reason: string) {
 
     broadcastSse('hazard_update', snapshot);
     await dispatchHazardItems(snapshot.items, reason);
+    if (shouldRunAiAgentAutomatically()) {
+      void runAiRecommendationAnalysis({ reason: `hazard_${reason}`, broadcast: true });
+    }
   } catch (error) {
     console.error('[hazard-monitor] tick failed:', error);
   } finally {
@@ -53,4 +57,3 @@ export function stopHazardMonitorLoopForTests() {
   loopTimer = null;
   loopStarted = false;
 }
-

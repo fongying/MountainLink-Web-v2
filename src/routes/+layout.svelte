@@ -1,17 +1,26 @@
 ﻿<script lang="ts">
+  import { page } from '$app/stores';
+
   export let data: { user: { id: number; username: string; is_admin: number } | null };
+
+  $: isDashboard = $page.url.pathname === '/dashboard';
 </script>
 
-<div class="appShell">
+<div class:dashboardShell={isDashboard} class="appShell">
   <nav class="topbar">
     <div class="brand">
-      <a href="/" class="brandLink">Mountain Link</a>
-      <span class="brandTag">Control</span>
+      <a href="/" class="brandLink">MountainLink</a>
+      <span class="brandTag">山域安全</span>
     </div>
 
     <div class="navLinks">
-      <a href="/dashboard" class="navLink">Dashboard</a>
+      <a href="/apply" class="navLink">登山申請</a>
+      <a href="/dashboard" class="navLink">監控中心</a>
+      {#if data.user}
+        <a href="/devices" class="navLink">裝置列表</a>
+      {/if}
       {#if data.user?.is_admin}
+        <a href="/admin" class="navLink">管理者入口</a>
         <a href="/register" class="navLink">註冊帳號</a>
       {/if}
     </div>
@@ -131,6 +140,39 @@
 
   .content{
     padding: 18px 22px 40px;
+  }
+
+  .dashboardShell{
+    background: #050c10;
+  }
+
+  .dashboardShell .topbar{
+    position: fixed;
+    right: 0;
+    left: 0;
+    transform: translateY(calc(-100% + 8px));
+    transition: transform 180ms ease, box-shadow 180ms ease, background 180ms ease;
+  }
+
+  .dashboardShell .topbar::after{
+    content: "";
+    position: absolute;
+    right: 0;
+    bottom: -8px;
+    left: 0;
+    height: 8px;
+    background: linear-gradient(90deg, rgba(16, 185, 129, 0.8), rgba(96, 165, 250, 0.75), rgba(245, 158, 11, 0.75));
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  }
+
+  .dashboardShell .topbar:hover,
+  .dashboardShell .topbar:focus-within{
+    transform: translateY(0);
+    box-shadow: 0 18px 36px rgba(0, 0, 0, 0.28);
+  }
+
+  .dashboardShell .content{
+    padding: 12px 22px;
   }
 
   @media (max-width: 720px){

@@ -3,6 +3,7 @@ import { listDeviceLabels } from '$lib/server/device-labels';
 import { listDeviceUnits } from '$lib/server/device-units';
 import { getUnifiedHazardSnapshot } from '$lib/server/hazards';
 import { ensureHazardMonitorLoop } from '$lib/server/hazard-monitor';
+import { getLatestAiRecommendation } from '$lib/server/ai-agent';
 import { registerSseClient, unregisterSseClient } from '$lib/server/stream';
 
 export const GET = async ({ request, locals }: any) => {
@@ -24,7 +25,31 @@ export const GET = async ({ request, locals }: any) => {
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       const encoder = new TextEncoder();
-      const sendRaw = (chunk: string) => controller.enqueue(encoder.encode(chunk));
+      let closed = false;
+      let onlineTimer: ReturnType<typeof setInterval> | null = null;
+      let heartbeat: ReturnType<typeof setInterval> | null = null;
+
+      const cleanup = () => {
+        if (closed) return;
+        closed = true;
+        if (onlineTimer) clearInterval(onlineTimer);
+        if (heartbeat) clearInterval(heartbeat);
+        unregisterSseClient(sseClient.id);
+        try {
+          controller.close();
+        } catch {
+          // The browser may have already closed the stream.
+        }
+      };
+
+      const sendRaw = (chunk: string) => {
+        if (closed) return;
+        try {
+          controller.enqueue(encoder.encode(chunk));
+        } catch {
+          cleanup();
+        }
+      };
       const sseClient = registerSseClient(sendRaw);
       const onlineState = new Map<string, boolean>();
 
@@ -39,6 +64,7 @@ export const GET = async ({ request, locals }: any) => {
           displayName: labels.get(device.deviceId) ?? device.displayName,
           unit: units.get(device.deviceId) ?? device.unit
         }));
+        if (closed) return;
         const filtered = deviceIdFilter
           ? devices.filter((device) => device.deviceId === deviceIdFilter)
           : devices;
@@ -58,15 +84,27 @@ export const GET = async ({ request, locals }: any) => {
       void (async () => {
         try {
           const { snapshot } = await getUnifiedHazardSnapshot({ reason: 'stream_connect' });
+          if (closed) return;
           sseClient.send('hazard_update', snapshot);
         } catch {
           // Ignore initial snapshot failure.
         }
       })();
 
-      const onlineTimer = setInterval(async () => {
+      void (async () => {
+        try {
+          const recommendation = await getLatestAiRecommendation();
+          if (closed || !recommendation) return;
+          sseClient.send('ai_recommendation_update', recommendation);
+        } catch {
+          // Ignore initial AI recommendation load failure.
+        }
+      })();
+
+      onlineTimer = setInterval(async () => {
         try {
           const devices = await listDeviceStates();
+          if (closed) return;
           const filtered = deviceIdFilter
             ? devices.filter((device) => device.deviceId === deviceIdFilter)
             : devices;
@@ -93,22 +131,14 @@ export const GET = async ({ request, locals }: any) => {
         }
       }, 30_000);
 
-      const heartbeat = setInterval(() => {
+      heartbeat = setInterval(() => {
         sseClient.comment('ping');
       }, 15_000);
 
-      const cleanup = () => {
-        clearInterval(onlineTimer);
-        clearInterval(heartbeat);
-        unregisterSseClient(sseClient.id);
-        try {
-          controller.close();
-        } catch {
-          // Ignore close error.
-        }
-      };
-
       request.signal.addEventListener('abort', cleanup, { once: true });
+    },
+    cancel() {
+      // Request abort handles cleanup for normal browser disconnects.
     }
   });
 

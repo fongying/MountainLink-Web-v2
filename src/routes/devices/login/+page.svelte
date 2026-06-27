@@ -13,7 +13,7 @@
     </div>
 
     <div class="actions">
-      <a class="primary" href="/dashboard">回到 Dashboard</a>
+      <a class="primary" href="/dashboard">回到監控中心</a>
     </div>
 
     <p class="hint">請至裝置詳情頁調整單位設定</p>
