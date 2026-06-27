@@ -41,6 +41,50 @@ export type OnlineEvent = {
 
 export type MLinkSseEvent = TelemetryEvent | OnlineEvent;
 
+export type AiRecommendationSeverity = 'info' | 'watch' | 'warning' | 'critical';
+export type AiRecommendationStatus = 'sent' | 'watch' | 'blocked' | 'failed' | 'disabled';
+
+export type AiRecommendationEvidence = {
+  id: string;
+  source: 'hazard' | 'forecast' | 'device' | 'terrain';
+  label: string;
+  detail?: string;
+};
+
+export type AiFocusedTeamContext = {
+  deviceId: string;
+  name: string;
+  unit?: string;
+  situationSummary: string;
+  physiologySummary: string;
+  terrainSummary: string;
+  operatorRecommendation: string;
+  movementMeters?: number;
+  movementWindowMinutes?: number;
+};
+
+export type AiRecommendation = {
+  id: string;
+  status: AiRecommendationStatus;
+  severity: AiRecommendationSeverity;
+  title: string;
+  reasoningSummary: string;
+  recommendedAction: string;
+  message: string;
+  targetAreas: string[];
+  globalSummary?: string;
+  focusDeviceId?: string;
+  teamContext?: AiFocusedTeamContext;
+  evidence: AiRecommendationEvidence[];
+  validationErrors: string[];
+  fingerprint: string;
+  provider: 'ollama' | 'nvidia';
+  model: string;
+  generatedAt: string;
+  dispatchedAt?: string;
+  dispatchError?: string;
+};
+
 export type RainLevel = '超大豪雨' | '大豪雨' | '豪雨' | '大雨';
 export type RainStatus = 'active' | 'ended';
 
@@ -136,4 +180,35 @@ export type EarthquakeEvent = {
   summary: string;
   severityScore: number;
   raw?: unknown;
+};
+
+export type MountainForecastPeriod = {
+  startTime?: string;
+  endTime?: string;
+  dataTime?: string;
+  weather?: string;
+  weatherCode?: string;
+  precipitationProbability?: number;
+  temperature?: number;
+  apparentTemperature?: number;
+  relativeHumidity?: number;
+  windSpeed?: string;
+  windDirection?: string;
+  comfort?: string;
+  description?: string;
+};
+
+export type MountainForecastLocation = {
+  county: string;
+  town: string;
+  datasetId: string;
+  periods: MountainForecastPeriod[];
+  riskFlags: string[];
+};
+
+export type MountainForecastSnapshot = {
+  issuedAt: string;
+  source: 'CWA';
+  horizonHours: number;
+  locations: MountainForecastLocation[];
 };

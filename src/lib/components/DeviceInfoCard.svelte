@@ -4,7 +4,8 @@
   export let device: DeviceTelemetry;
   export let showNavigate = true;
 
-  export let onNavigate: ((deviceId: string) => void) | undefined;
+  export let onNavigate: ((deviceId: string) => void) | undefined = undefined;
+  export let onClose: (() => void) | undefined = undefined;
 
   function coordText(d: DeviceTelemetry) {
     const lat = typeof d.lat === 'number' ? d.lat : Number(d.lat);
@@ -41,8 +42,7 @@
   };
   $: unitColor = UNIT_COLORS[unitText] ?? '#16a34a';
   $: unitShape = UNIT_SHAPES[unitText] ?? 'dot';
-  $: sosText = device.sos ? '🚨 SOS 觸發中' : '狀態正常';
-  $: sosColor = device.sos ? '#b00020' : '#166534';
+  $: sosText = device.sos ? 'SOS 觸發中' : '狀態正常';
   $: hrText = device.hr != null ? `${device.hr} bpm` : '—';
   $: batText = device.battery != null ? `${device.battery}%${device.charging ? '（充電中）' : ''}` : '—';
   $: spo2Text = device.spo2 != null ? `${device.spo2}%` : '—';
@@ -51,29 +51,38 @@
 </script>
 
 <div class="card">
+  {#if onClose}
+    <button class="closeButton" type="button" aria-label="關閉裝置資訊" on:click={onClose}>×</button>
+  {/if}
   <div class="body">
-    <div class="title">{displayTitle}</div>
-    {#if deviceIdText}
-      <div class="deviceId">{deviceIdText}</div>
-    {/if}
+    <div class="header">
+      <div>
+        <div class="title">{displayTitle}</div>
+        {#if deviceIdText}
+          <div class="deviceId">{deviceIdText}</div>
+        {/if}
+      </div>
+    </div>
 
-    <div class="unitBadge">
-      <span class={`unitIcon shape-${unitShape}`} style={`--unit-color:${unitColor};`}></span>
-      <span>{unitText}</span>
+    <div class="badgeRow">
+      <div class="unitBadge">
+        <span class={`unitIcon shape-${unitShape}`} style={`--unit-color:${unitColor};`}></span>
+        <span>{unitText}</span>
+      </div>
+      <div class:activeSos={device.sos} class="statusBadge">{sosText}</div>
     </div>
 
     <div class="grid">
-      <div><b>單位：</b>{unitText}</div>
-      <div><b>座標：</b>{coordText(device)}</div>
-      <div><b>心率：</b>{hrText}</div>
-      <div><b>電量：</b>{batText}</div>
-      <div><b>血氧：</b>{spo2Text}</div>
-      <div><b>血壓：</b>{bpText}</div>
-      <div><b>體溫：</b>{btText}</div>
-      <div><b>狀態：</b>{device.online ? 'Online' : 'Offline'}</div>
-      <div class="sos" style={`color: ${sosColor};`}>{sosText}</div>
-      <div class="muted"><b>最後更新：</b>{updatedText(device)}</div>
+      <div class="wide"><b>座標</b><span>{coordText(device)}</span></div>
+      <div><b>心率</b><span>{hrText}</span></div>
+      <div><b>血氧</b><span>{spo2Text}</span></div>
+      <div><b>血壓</b><span>{bpText}</span></div>
+      <div><b>體溫</b><span>{btText}</span></div>
+      <div><b>電量</b><span>{batText}</span></div>
+      <div><b>狀態</b><span>{device.online ? 'Online' : 'Offline'}</span></div>
     </div>
+
+    <div class="updatedLine">最後更新 {updatedText(device)}</div>
 
     {#if showNavigate}
       <button class="cta" on:click={() => onNavigate?.(device.deviceId)}>
@@ -87,29 +96,77 @@
   @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
 
   .card{
-    width: 260px;
-    border-radius: 14px;
-    border: 1px solid #ddd;
-    background: #fff;
+    position: relative;
+    width: 292px;
+    max-width: calc(100vw - 48px);
+    border-radius: 10px;
+    border: 1px solid rgba(96, 165, 250, 0.42);
+    background: #07151b;
+    color: #edf7fb;
     overflow: hidden;
     font-family: "IBM Plex Sans", "Noto Sans TC", sans-serif;
+    box-shadow: 0 18px 34px rgba(0, 0, 0, 0.38);
   }
 
-  .body{ padding: 12px 12px 8px; }
+  .body{ padding: 10px 12px 11px; }
+
+  .closeButton{
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 2;
+    width: 26px;
+    height: 26px;
+    display: grid;
+    place-items: center;
+    border: 1px solid rgba(148, 197, 253, 0.32);
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.82);
+    color: #dff5ff;
+    cursor: pointer;
+    font-size: 22px;
+    line-height: 1;
+  }
+
+  .closeButton:hover,
+  .closeButton:focus-visible{
+    border-color: rgba(148, 197, 253, 0.72);
+    background: rgba(30, 64, 175, 0.6);
+    outline: none;
+  }
+
+  .header{
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    padding-right: 34px;
+    min-height: 30px;
+    align-items: start;
+  }
 
   .title{
     font-weight: 800;
     font-size: 15px;
-    margin-bottom: 6px;
+    line-height: 1.25;
+    margin: 0 0 5px 0;
+    color: #f8fafc;
   }
 
   .deviceId{
-    margin: -2px 0 8px;
+    margin: 0 0 8px 0;
     font-size: 12px;
-    color: #667578;
+    color: #93a4ad;
   }
 
-  .unitBadge{
+  .badgeRow{
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+  }
+
+  .unitBadge,
+  .statusBadge{
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -117,9 +174,21 @@
     border-radius: 999px;
     font-size: 12px;
     font-weight: 600;
-    color: #0b1b1e;
-    background: rgba(12, 40, 46, 0.06);
-    margin-bottom: 8px;
+    color: #dff8ff;
+    background: rgba(96, 165, 250, 0.12);
+    border: 1px solid rgba(96, 165, 250, 0.22);
+  }
+
+  .statusBadge{
+    color: #bbf7d0;
+    background: rgba(34, 197, 94, 0.12);
+    border-color: rgba(74, 222, 128, 0.26);
+  }
+
+  .statusBadge.activeSos{
+    color: #fecaca;
+    background: rgba(220, 38, 38, 0.14);
+    border-color: rgba(248, 113, 113, 0.32);
   }
 
   .unitIcon{
@@ -128,7 +197,7 @@
     height: 10px;
     display: inline-block;
     background: var(--unit-color);
-    border: 2px solid #fff;
+    border: 2px solid #edf7fb;
     box-shadow: 0 1px 3px rgba(0,0,0,0.15);
   }
 
@@ -169,22 +238,62 @@
 
   .grid{
     display: grid;
-    gap: 6px;
-    font-size: 12.5px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+    font-size: 12px;
+    color: #d7e8ee;
   }
 
-  .sos{ font-weight: 800; }
+  .grid > div{
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+    border: 1px solid rgba(148, 163, 184, 0.12);
+    border-radius: 7px;
+    padding: 5px 7px 4px;
+    background: rgba(255, 255, 255, 0.035);
+  }
 
-  .muted{ color: #666; }
+  .grid .wide{
+    grid-column: 1 / -1;
+  }
+
+  .grid b{
+    color: #91c9f7;
+    font-weight: 700;
+    font-size: 11px;
+  }
+
+  .grid span{
+    min-width: 0;
+    overflow-wrap: anywhere;
+    line-height: 1.3;
+  }
+
+  .updatedLine{
+    margin-top: 6px;
+    color: #9eb0b8;
+    font-size: 11px;
+    line-height: 1.2;
+  }
 
   .cta{
-    margin-top: 10px;
+    margin-top: 7px;
     width: 100%;
-    padding: 9px 10px;
-    border-radius: 12px;
-    border: 1px solid #ddd;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid rgba(96, 165, 250, 0.32);
     cursor: pointer;
-    background: #fff;
+    background: rgba(96, 165, 250, 0.12);
+    color: #edf7fb;
     font-weight: 700;
+    font-size: 12px;
+  }
+
+  .cta:hover,
+  .cta:focus-visible{
+    border-color: rgba(96, 165, 250, 0.62);
+    background: rgba(96, 165, 250, 0.2);
+    outline: none;
   }
 </style>

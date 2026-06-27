@@ -4,9 +4,9 @@
 
 <section class="authPage">
   <div class="authCard">
-    <p class="eyebrow">Mountain Link</p>
+    <p class="eyebrow">MountainLink</p>
     <h1>註冊</h1>
-    <p class="subtitle">建立新帳號以使用系統</p>
+    <p class="subtitle">建立帳號以使用山域安全管理功能</p>
 
     <form class="authForm" method="POST">
       <label>

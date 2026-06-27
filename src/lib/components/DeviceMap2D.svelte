@@ -5,7 +5,7 @@
 
   export let device: DeviceTelemetry | null = null;
 
-  export let height = 320;
+  export let height: number | string = 320;
   export let zoom = 16;
   export let lockView = true;
   export let showTerrain = false;
@@ -168,11 +168,11 @@
   }
 </script>
 
-<div style="border:1px solid #ddd; border-radius:12px; overflow:hidden;">
+<div style={`height:${typeof height === 'number' ? `${height}px` : height}; box-sizing:border-box; border:1px solid #ddd; border-radius:12px; overflow:hidden;`}>
   {#if getLatLng(device)}
-    <div bind:this={mapEl} style={`height:${height}px; width:100%;`}></div>
+    <div bind:this={mapEl} style="height:100%; width:100%;"></div>
   {:else}
-    <div style={`height:${height}px; display:flex; align-items:center; justify-content:center; color:#666;`}>
+    <div style="height:100%; display:flex; align-items:center; justify-content:center; color:#666;">
       尚無位置資訊
     </div>
   {/if}

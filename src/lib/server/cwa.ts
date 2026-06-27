@@ -9,13 +9,15 @@ type CacheEntry = {
   data: unknown;
 };
 
+type CwaParamValue = string | string[];
+
 const cache = new Map<string, CacheEntry>();
 
 function getAuthKey() {
   return env.CWA_API_KEY || env.CWA_OPEN_DATA_API_KEY || env.CWA_AUTHORIZATION || '';
 }
 
-function cacheKey(datasetId: string, params: Record<string, string>) {
+function cacheKey(datasetId: string, params: Record<string, CwaParamValue>) {
   const sorted = Object.entries(params).sort(([a], [b]) => a.localeCompare(b));
   const raw = `${datasetId}|${JSON.stringify(sorted)}`;
   return createHash('sha1').update(raw).digest('hex');
@@ -23,7 +25,7 @@ function cacheKey(datasetId: string, params: Record<string, string>) {
 
 export async function fetchCwaDatastore<T>(
   datasetId: string,
-  params: Record<string, string> = {},
+  params: Record<string, CwaParamValue> = {},
   ttlMs = DEFAULT_TTL_MS
 ): Promise<T> {
   const auth = getAuthKey();
@@ -31,7 +33,7 @@ export async function fetchCwaDatastore<T>(
     throw new Error('Missing CWA API key. Set CWA_API_KEY in environment.');
   }
 
-  const query: Record<string, string> = {
+  const query: Record<string, CwaParamValue> = {
     Authorization: auth,
     format: 'JSON',
     ...params
@@ -45,7 +47,9 @@ export async function fetchCwaDatastore<T>(
   }
 
   const url = new URL(`${BASE_URL}/${datasetId}`);
-  Object.entries(query).forEach(([k, v]) => url.searchParams.set(k, v));
+  Object.entries(query).forEach(([k, v]) => {
+    url.searchParams.set(k, Array.isArray(v) ? v.join(',') : v);
+  });
 
   const res = await fetch(url.toString(), {
     method: 'GET',

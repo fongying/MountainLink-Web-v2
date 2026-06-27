@@ -1,4 +1,6 @@
 ﻿import type { AlertItem } from '$lib/types/alerts';
+import type { ColdAlert, RainAlert } from '$lib/types';
+import { splitTaiwanArea, toMountainAreaNames } from '$lib/mountain-areas';
 import { getColdAlertsCached, isColdCacheExpired } from '$lib/server/alerts/cold';
 import { getRainAlertsCached, isRainCacheExpired } from '$lib/server/alerts/rain';
 import { listEqEvents } from '$lib/server/earthquake';
@@ -19,6 +21,38 @@ export type HazardSnapshot = {
 
 let snapshot: HazardSnapshot | null = null;
 let snapshotHash = '';
+
+function countiesFromAreas(areas: string[]) {
+  return Array.from(
+    new Set(
+      areas
+        .map((area) => splitTaiwanArea(area)?.county)
+        .filter((county): county is string => Boolean(county))
+    )
+  ).sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+}
+
+function filterMountainRainAlerts(alerts: RainAlert[]) {
+  return alerts
+    .map((alert) => ({
+      ...alert,
+      areas: toMountainAreaNames(alert.areas)
+    }))
+    .filter((alert) => alert.areas.length > 0);
+}
+
+function filterMountainColdAlerts(alerts: ColdAlert[]) {
+  return alerts
+    .map((alert) => {
+      const areas = toMountainAreaNames(alert.areas.length > 0 ? alert.areas : alert.counties);
+      return {
+        ...alert,
+        areas,
+        counties: countiesFromAreas(areas)
+      };
+    })
+    .filter((alert) => alert.areas.length > 0);
+}
 
 function computeHash(items: AlertItem[], notice?: string) {
   return JSON.stringify({
@@ -52,13 +86,13 @@ export async function getUnifiedHazardItems() {
   const failedKinds: string[] = [];
 
   if (rainResult.status === 'fulfilled') {
-    items.push(...mapRainToAlertItems(rainResult.value));
+    items.push(...mapRainToAlertItems(filterMountainRainAlerts(rainResult.value)));
   } else {
     failedKinds.push('豪雨');
   }
 
   if (coldResult.status === 'fulfilled') {
-    items.push(...mapColdToAlertItems(coldResult.value));
+    items.push(...mapColdToAlertItems(filterMountainColdAlerts(coldResult.value)));
   } else {
     failedKinds.push('低溫');
   }
