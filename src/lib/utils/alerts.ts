@@ -56,6 +56,16 @@ function fallbackId(parts: Array<string | number | undefined>) {
   return parts.map((p) => String(p ?? '')).join('|');
 }
 
+export function earthquakeRegionFromLocation(location: string): string | undefined {
+  const locatedArea = location.match(/位於\s*([^\s，、,()（）]+?[縣市])\s*([^\s，、,()（）]+?[鄉鎮市區])/);
+  if (locatedArea) return `${locatedArea[1]}${locatedArea[2]}`.replace(/^台/, '臺');
+
+  const directArea = location.trim().match(/^([^\s，、,()（）]+?[縣市])\s*([^\s，、,()（）]+?[鄉鎮市區])$/);
+  if (directArea) return `${directArea[1]}${directArea[2]}`.replace(/^台/, '臺');
+
+  return undefined;
+}
+
 export function mapEqToAlertItems(rawEq: unknown): AlertItem[] {
   const rows = Array.isArray(rawEq) ? rawEq : [];
 
@@ -108,7 +118,7 @@ export function mapEqToAlertItems(rawEq: unknown): AlertItem[] {
       severity: eqSeverityByMagnitude(magnitude),
       issuedAt,
       eventAt,
-      region: location || undefined,
+      region: earthquakeRegionFromLocation(location),
       source: 'CWA',
       raw: row
     } satisfies AlertItem;
