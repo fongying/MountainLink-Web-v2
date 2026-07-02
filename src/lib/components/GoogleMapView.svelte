@@ -175,11 +175,17 @@
     }
   }
 
-  function alertRegionStyle(severity: MapAlertRegion['severity']) {
-    if (severity === 'critical') return { fill: '#ef4444', stroke: '#fecaca', opacity: 0.25 };
-    if (severity === 'warning') return { fill: '#f59e0b', stroke: '#fde68a', opacity: 0.22 };
-    if (severity === 'watch') return { fill: '#38bdf8', stroke: '#bae6fd', opacity: 0.18 };
-    return { fill: '#94a3b8', stroke: '#e2e8f0', opacity: 0.12 };
+  function alertRegionStyle(region: MapAlertRegion) {
+    const palette =
+      region.type === 'earthquake'
+        ? { fill: '#a855f7', stroke: '#e9d5ff' }
+        : region.type === 'cold'
+          ? { fill: '#06b6d4', stroke: '#cffafe' }
+          : { fill: '#f59e0b', stroke: '#fef3c7' };
+    const opacity =
+      region.severity === 'critical' ? 0.34 : region.severity === 'warning' ? 0.28 : region.severity === 'watch' ? 0.22 : 0.15;
+    const strokeWeight = region.severity === 'critical' ? 3.2 : region.severity === 'warning' ? 2.6 : 2;
+    return { ...palette, opacity, strokeWeight };
   }
 
   function alertRegionLabel(severity: MapAlertRegion['severity']) {
@@ -203,7 +209,7 @@
         };
       }
 
-      const style = alertRegionStyle(region.severity);
+      const style = alertRegionStyle(region);
       return {
         visible: true,
         clickable: true,
@@ -211,7 +217,7 @@
         fillOpacity: style.opacity,
         strokeColor: style.stroke,
         strokeOpacity: 0.92,
-        strokeWeight: 2,
+        strokeWeight: style.strokeWeight,
         zIndex: 2
       };
     });
@@ -231,7 +237,7 @@
         const region = alertRegions.find((item) => item.areaKey === areaKey);
         if (!areaKey || !region || !map) return;
 
-        const style = alertRegionStyle(region.severity);
+        const style = alertRegionStyle(region);
         map.data.overrideStyle(event.feature, {
           fillOpacity: Math.min(style.opacity + 0.14, 0.42),
           strokeWeight: 3,

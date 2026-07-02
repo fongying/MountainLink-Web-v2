@@ -495,6 +495,10 @@
         <span><i class="tri"></i>SOS</span>
         <span><i class="dot blue"></i>搜救</span>
         <span><i class="dot orange"></i>警消</span>
+        <i class="legendDivider" aria-hidden="true"></i>
+        <span><i class="hazardSwatch rain"></i>豪雨／大雨</span>
+        <span><i class="hazardSwatch cold"></i>低溫</span>
+        <span><i class="hazardSwatch earthquake"></i>地震</span>
       </div>
 
       <div class="mapViewport">
@@ -1019,6 +1023,24 @@
     border-right: 5px solid transparent;
     border-bottom: 9px solid var(--red);
   }
+
+  .legendDivider{
+    width: 1px;
+    height: 14px;
+    background: rgba(148, 163, 184, 0.28);
+  }
+
+  .hazardSwatch{
+    width: 13px;
+    height: 9px;
+    display: inline-block;
+    border: 1px solid rgba(255, 255, 255, 0.72);
+    border-radius: 2px;
+  }
+
+  .hazardSwatch.rain{ background: #f59e0b; }
+  .hazardSwatch.cold{ background: #06b6d4; }
+  .hazardSwatch.earthquake{ background: #a855f7; }
 
   .mapViewport{
     min-height: 0;

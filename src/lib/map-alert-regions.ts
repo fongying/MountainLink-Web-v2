@@ -1,4 +1,4 @@
-import type { AlertItem, Severity } from '$lib/types/alerts';
+import type { AlertItem, HazardType, Severity } from '$lib/types/alerts';
 import { mountainTownsForCounty, splitTaiwanArea } from '$lib/mountain-areas';
 
 export type MapAlertRegion = {
@@ -6,6 +6,8 @@ export type MapAlertRegion = {
   areaKey: string;
   label: string;
   severity: Severity;
+  type: HazardType;
+  hazardTypes: HazardType[];
 };
 
 const SEVERITY_RANK: Record<Severity, number> = {
@@ -13,6 +15,19 @@ const SEVERITY_RANK: Record<Severity, number> = {
   watch: 1,
   warning: 2,
   critical: 3
+};
+
+const HAZARD_TYPE_RANK: Record<HazardType, number> = {
+  cold: 1,
+  rain: 2,
+  earthquake: 3
+};
+
+type AreaAlertMeta = {
+  severity: Severity;
+  type: HazardType;
+  titles: string[];
+  hazardTypes: HazardType[];
 };
 
 function splitRegion(region?: string) {
@@ -46,7 +61,7 @@ function alertAreasFromItem(item: AlertItem) {
 }
 
 export function mapAlertRegionsFromItems(items: AlertItem[], limit = 120): MapAlertRegion[] {
-  const byArea = new Map<string, { severity: Severity; title: string }>();
+  const byArea = new Map<string, AreaAlertMeta>();
 
   for (const item of items) {
     if (item.status === 'ended') continue;
@@ -54,18 +69,39 @@ export function mapAlertRegionsFromItems(items: AlertItem[], limit = 120): MapAl
 
     for (const areaKey of alertAreasFromItem(item)) {
       const current = byArea.get(areaKey);
-      if (!current || SEVERITY_RANK[item.severity] > SEVERITY_RANK[current.severity]) {
-        byArea.set(areaKey, { severity: item.severity, title: item.title });
+      if (!current) {
+        byArea.set(areaKey, {
+          severity: item.severity,
+          type: item.type,
+          titles: [item.title],
+          hazardTypes: [item.type]
+        });
+        continue;
+      }
+
+      if (!current.titles.includes(item.title)) current.titles.push(item.title);
+      if (!current.hazardTypes.includes(item.type)) current.hazardTypes.push(item.type);
+
+      const isMoreSevere = SEVERITY_RANK[item.severity] > SEVERITY_RANK[current.severity];
+      const winsSeverityTie =
+        SEVERITY_RANK[item.severity] === SEVERITY_RANK[current.severity] &&
+        HAZARD_TYPE_RANK[item.type] > HAZARD_TYPE_RANK[current.type];
+
+      if (isMoreSevere || winsSeverityTie) {
+        current.severity = item.severity;
+        current.type = item.type;
       }
     }
   }
 
   return Array.from(byArea.entries())
     .map(([areaKey, meta]) => ({
-      id: `${meta.severity}:${areaKey}`,
+      id: `${meta.type}:${meta.severity}:${areaKey}`,
       areaKey,
-      label: `${areaKey} ${meta.title}`,
-      severity: meta.severity
+      label: `${areaKey} ${meta.titles.join('、')}`,
+      severity: meta.severity,
+      type: meta.type,
+      hazardTypes: meta.hazardTypes
     }))
     .slice(0, limit);
 }
