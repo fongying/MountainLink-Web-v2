@@ -58,7 +58,7 @@ type TeamRiskContext = {
   riskReasons: string[];
   online: boolean;
   sos?: boolean;
-  battery: number;
+  battery?: number | null;
   charging?: boolean;
   lat?: number;
   lon?: number;
@@ -347,7 +347,7 @@ function scoreDeviceRisk(device: DeviceTelemetry) {
     score += 30;
     reasons.push('離線');
   }
-  if (device.battery <= 20) {
+  if (device.battery != null && device.battery <= 20) {
     score += 18;
     reasons.push(`低電量 ${device.battery}%`);
   }

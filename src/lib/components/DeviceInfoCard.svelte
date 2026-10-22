@@ -1,4 +1,5 @@
 ﻿<script lang="ts">
+  import { formatBattery, powerStatus } from '$lib/battery';
   import type { DeviceTelemetry } from '$lib/types';
 
   export let device: DeviceTelemetry;
@@ -44,7 +45,7 @@
   $: unitShape = UNIT_SHAPES[unitText] ?? 'dot';
   $: sosText = device.sos ? 'SOS 觸發中' : '狀態正常';
   $: hrText = device.hr != null ? `${device.hr} bpm` : '—';
-  $: batText = device.battery != null ? `${device.battery}%${device.charging ? '（充電中）' : ''}` : '—';
+  $: batText = formatBattery(device);
   $: spo2Text = device.spo2 != null ? `${device.spo2}%` : '—';
   $: bpText = device.bpHi != null && device.bpLo != null ? `${device.bpHi}/${device.bpLo}` : '—';
   $: btText = device.bt != null ? `${device.bt}°C` : '—';
@@ -74,6 +75,10 @@
 
     <div class="grid">
       <div class="wide"><b>座標</b><span>{coordText(device)}</span></div>
+      {#if device.mx2GpsValid !== undefined}
+        <div class="wide"><b>GPS</b><span>{device.mx2GpsValid ? '有效' : '無效，顯示最後有效位置'}</span></div>
+        <div class="wide"><b>定位時間</b><span>{device.mx2PositionTs ? new Date(device.mx2PositionTs).toLocaleString() : '尚無有效定位'}</span></div>
+      {/if}
       <div><b>心率</b><span>{hrText}</span></div>
       <div><b>血氧</b><span>{spo2Text}</span></div>
       <div><b>血壓</b><span>{bpText}</span></div>

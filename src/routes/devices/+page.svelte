@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { formatBattery, powerStatus } from '$lib/battery';
   import { onMount } from 'svelte';
   import type { DeviceTelemetry, MLinkSseEvent } from '$lib/types';
   import { connectSse } from '$lib/client/sse';
@@ -18,7 +19,7 @@
   const fmtTime = (ms: number) => new Date(ms).toLocaleString();
   const titleOf = (device: DeviceTelemetry) => device.displayName?.trim() || device.deviceId;
   const unitOf = (device: DeviceTelemetry) => device.unit?.trim() || '未分類';
-  const batteryText = (device: DeviceTelemetry) => `${device.battery ?? 0}%${device.charging ? ' 充電中' : ''}`;
+  const batteryText = formatBattery;
   const coordinateText = (device: DeviceTelemetry) => {
     if (device.lat == null || device.lon == null) return '無定位';
     const alt = device.alt == null ? '' : ` / ${Math.round(device.alt)}m`;
@@ -38,7 +39,7 @@
     if (device.sos) return 'SOS';
     if (!device.online) return '離線';
     if (physiologicalAbnormalities(device).length > 0) return '生理異常';
-    if ((device.battery ?? 0) <= 20) return '低電量';
+    if ((device.battery != null && device.battery <= 20)) return '低電量';
     return '正常';
   }
 
@@ -46,14 +47,14 @@
     if (device.sos) return 'danger';
     if (!device.online) return 'offline';
     if (physiologicalAbnormalities(device).length > 0) return 'risk';
-    if ((device.battery ?? 0) <= 20) return 'warn';
+    if ((device.battery != null && device.battery <= 20)) return 'warn';
     return 'ok';
   }
 
   function matchesFilter(device: DeviceTelemetry) {
     if (filter === 'online') return device.online;
     if (filter === 'sos') return Boolean(device.sos);
-    if (filter === 'risk') return physiologicalAbnormalities(device).length > 0 || (device.battery ?? 0) <= 20;
+    if (filter === 'risk') return physiologicalAbnormalities(device).length > 0 || (device.battery != null && device.battery <= 20);
     if (filter === 'offline') return !device.online;
     return true;
   }
@@ -87,7 +88,7 @@
         {
           deviceId: evt.deviceId,
           online: evt.online,
-          battery: devices.find((device) => device.deviceId === evt.deviceId)?.battery ?? 0,
+          battery: devices.find((device) => device.deviceId === evt.deviceId)?.battery,
           updatedAt: evt.updatedAt
         }
       ]);
@@ -114,7 +115,7 @@
 
   $: onlineCount = devices.filter((device) => device.online).length;
   $: sosCount = devices.filter((device) => device.sos).length;
-  $: riskCount = devices.filter((device) => physiologicalAbnormalities(device).length > 0 || (device.battery ?? 0) <= 20).length;
+  $: riskCount = devices.filter((device) => physiologicalAbnormalities(device).length > 0 || (device.battery != null && device.battery <= 20)).length;
   $: offlineCount = devices.filter((device) => !device.online).length;
   $: filteredDevices = devices.filter((device) => matchesFilter(device) && matchesQuery(device));
   $: latestUpdate = devices.reduce((latest, device) => Math.max(latest, device.updatedAt ?? 0), 0);

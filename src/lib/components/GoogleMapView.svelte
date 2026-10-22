@@ -48,6 +48,8 @@
   }
 
   function hasLatLon(d: DeviceTelemetry) {
+    if (d.lat == null || d.lon == null) return false;
+    if (d.lat == null || d.lon == null) return false;
     const lat = typeof d.lat === 'number' ? d.lat : Number(d.lat);
     const lon = typeof d.lon === 'number' ? d.lon : Number(d.lon);
     return Number.isFinite(lat) && Number.isFinite(lon);

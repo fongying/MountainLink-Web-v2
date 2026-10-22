@@ -1,4 +1,5 @@
 ﻿<script lang="ts">
+  import { formatBattery, powerStatus } from '$lib/battery';
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import type { AiRecommendation, DeviceTelemetry, MLinkSseEvent } from '$lib/types';
@@ -70,14 +71,14 @@
   const deviceTitle = (d: DeviceTelemetry) => d.displayName?.trim() || d.deviceId;
   const deviceHref = (deviceId?: string | null) => (deviceId ? `/devices/${encodeURIComponent(deviceId)}` : '/dashboard');
   const applicationHref = (applicationId?: number | null) => (applicationId ? `/apply/${applicationId}` : '/apply');
-  const batteryText = (d: DeviceTelemetry) => `${d.battery}%${d.charging ? ' 充電中' : ''}`;
+  const batteryText = formatBattery;
 
   $: deviceById = new Map(devices.map((device) => [device.deviceId, device]));
   $: onlineCount = devices.filter((device) => device.online).length;
   $: sosDevices = devices.filter((device) => device.sos);
-  $: lowBatteryDevices = devices.filter((device) => device.battery <= 20);
+  $: lowBatteryDevices = devices.filter((device) => device.battery != null && device.battery <= 20);
   $: offlineDevices = devices.filter((device) => !device.online);
-  $: normalDevices = devices.filter((device) => !device.sos && device.online && device.battery > 20);
+  $: normalDevices = devices.filter((device) => !device.sos && device.online && (device.battery == null || device.battery > 20));
   $: highRiskItems = devices
     .map((device): PhysiologicalRiskItem => ({ device, abnormalities: physiologicalAbnormalities(device) }))
     .filter((item) => item.abnormalities.length > 0);
@@ -347,7 +348,7 @@
         {
           deviceId: evt.deviceId,
           online: evt.online,
-          battery: devices.find((d) => d.deviceId === evt.deviceId)?.battery ?? 0,
+          battery: devices.find((d) => d.deviceId === evt.deviceId)?.battery,
           updatedAt: evt.updatedAt
         }
       ]);

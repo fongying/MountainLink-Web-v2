@@ -20,7 +20,7 @@
   }
 
   function getLatLng(d: DeviceTelemetry | null): { lat: number; lng: number } | null {
-    if (!d) return null;
+    if (!d || d.lat == null || d.lon == null) return null;
     const lat = toNum(d.lat);
     const lng = toNum(d.lon);
     if (lat == null || lng == null) return null;
