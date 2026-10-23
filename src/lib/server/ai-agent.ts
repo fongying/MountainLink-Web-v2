@@ -1,3 +1,4 @@
+import { constrainRecommendationSchema } from '$lib/server/ollama-json';
 import { readAiSettings } from '$lib/server/ai-settings';
 ﻿import { createHash, randomUUID } from 'node:crypto';
 import { env } from '$env/dynamic/private';
@@ -11,7 +12,7 @@ import type {
   MountainForecastLocation
 } from '$lib/types';
 import type { AlertItem } from '$lib/types/alerts';
-import { isMountainArea } from '$lib/mountain-areas';
+import { isMountainArea, MOUNTAIN_FORECAST_LOCATIONS } from '$lib/mountain-areas';
 import { getUnifiedHazardSnapshot } from '$lib/server/hazards';
 import { getMountainForecastSnapshotCached } from '$lib/server/forecast';
 import { listDeviceStates } from '$lib/server/device-telemetry';
@@ -848,7 +849,11 @@ async function analyze(reason: string) {
     const request = {
       system: buildSystemPrompt(),
       prompt: buildPrompt(snapshot),
-      schema: AI_RECOMMENDATION_SCHEMA
+      schema: provider === 'ollama' ? constrainRecommendationSchema(AI_RECOMMENDATION_SCHEMA, {
+        focusDeviceId: snapshot.focusTeam!.deviceId,
+        evidenceIds: snapshot.evidence.map(item => item.id),
+        targetAreas: MOUNTAIN_FORECAST_LOCATIONS.map(area => `${area.county}${area.town}`)
+      }) : AI_RECOMMENDATION_SCHEMA
     };
     llmResult = provider === 'nvidia' ? await generateNvidiaJson(request) : await generateOllamaJson(request);
   } catch (error) {
