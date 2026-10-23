@@ -41,3 +41,14 @@ test('all 188 official geometries agree with independent Shapely/PROJ reference'
   assert.ok(Math.abs(result.distanceMeters-item.distance)<Math.max(2,item.distance*0.01),`${item.id}: ${result.distanceMeters} vs ${item.distance}`);
  }
 });
+import { validateGeohazardClaims } from '../src/lib/geohazard-validation.ts';
+test('AI cannot contradict expired or outside official position evidence',()=>{
+ const stale=assessGeohazards({lat:23,lon:120,updatedAt:0},dataset,now);
+ assert.equal(validateGeohazardClaims(['該裝置位於南投縣仁愛鄉，附近存在崩塌潛勢區域。'],stale).length,1);
+ const outside=assessGeohazards({lat:23.57,lon:119.58,updatedAt:now},dataset,now);
+ assert.equal(validateGeohazardClaims(['隊伍位於崩塌潛勢區內'],outside).length,1);
+ assert.deepEqual(validateGeohazardClaims(['座標未落入崩塌潛勢區，不代表安全。'],outside),[]);
+ assert.deepEqual(validateGeohazardClaims(['請留意天候並確認路線安全。'],outside),[]);
+ const inside={...outside,matches:[{...outside.matches[0],relation:'inside' as const}]};
+ assert.deepEqual(validateGeohazardClaims(['位於崩塌潛勢區內'],inside),[]);
+});

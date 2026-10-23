@@ -1,3 +1,4 @@
+import { validateGeohazardClaims } from '$lib/geohazard-validation';
 import { assessGeohazards, type GeoAssessment } from '$lib/geohazards';
 import { getGeohazardDataset } from '$lib/server/geohazards';
 import { constrainRecommendationSchema } from '$lib/server/ollama-json';
@@ -636,6 +637,18 @@ async function validateRecommendation(
 ) {
   const errors: string[] = [];
   const severity = normalizeSeverity(output.severity);
+  if (snapshot.focusTeam) {
+    const geo = snapshot.focusTeam.geohazard;
+    errors.push(...validateGeohazardClaims([
+      output.teamSituationSummary ?? '', output.terrainSummary ?? '', output.meshtasticDraft ?? '', output.message ?? ''
+    ], geo));
+    errors.push(...validateGeohazardClaims([
+      output.globalSummary ?? '', output.reasoningSummary ?? ''
+    ], { ...geo, status: 'ok', matches: snapshot.teamRiskContext.filter(t=>t.geohazard.status === 'ok').flatMap(t=>t.geohazard.matches) }));
+    if (output.send && geo.status !== 'ok') {
+      errors.push('焦點隊伍沒有有效且未過期的定位，禁止自動發送以所在地為依據的災害建議，請先人工確認位置。');
+    }
+  }
 
   if (!snapshot.focusTeam) errors.push('目前沒有可鎖定的有狀況隊伍');
   if (snapshot.focusTeam && output.focusDeviceId !== snapshot.focusTeam.deviceId) {
@@ -684,7 +697,7 @@ function teamContextFromOutput(output: LlmRecommendation, focusTeam?: TeamRiskCo
     unit: focusTeam.unit,
     situationSummary: (output.teamSituationSummary || focusTeam.riskReasons.join('、')).trim().slice(0, 220),
     physiologySummary: (output.physiologySummary || physiologyFallback).trim().slice(0, 220),
-    terrainSummary: (output.terrainSummary || focusTeam.terrain.summary).trim().slice(0, 260),
+    terrainSummary: `${focusTeam.geohazard.summary}；${focusTeam.terrain.summary}`.trim().slice(0, 520),
     operatorRecommendation: (output.operatorRecommendation || output.recommendedAction || '持續監控隊伍狀態並確認通訊。').trim().slice(0, 260),
     movementMeters: focusTeam.terrain.movementMeters,
     movementWindowMinutes: focusTeam.terrain.movementWindowMinutes
@@ -703,8 +716,8 @@ function alertLabelFromEvidence(evidence: AiRecommendationEvidence[]) {
 
 function terrainWarningText(summary?: string) {
   if (!summary) return '請注意地形風險';
-  if (/高差大|陡坡|崩塌|坍塌|地形陡峭|行動需保守/.test(summary)) {
-    return '周邊地形陡峭，請注意坍塌與落石風險';
+  if (/高差大|陡坡|地形陡峭|行動需保守/.test(summary)) {
+    return '周邊高差較大，請確認實際路線及地面狀況';
   }
   if (/明顯起伏|確認路線|高差/.test(summary)) {
     return '周邊地形起伏明顯，請確認路線安全';
