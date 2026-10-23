@@ -16,9 +16,9 @@ export function installGeohazardControls(map:any) {
     layer.setStyle({fillColor:color,strokeColor:color,fillOpacity:0.2,strokeWeight:2,zIndex:20,clickable:true});
     const info=new google.maps.InfoWindow();
     listeners.push(layer.addListener('click',(event:any)=>{
-      const f=event.feature, content=document.createElement('div');content.style.cssText='color:#172633;max-width:280px;line-height:1.6';
+      const f=event.feature, content=document.createElement('div');content.style.cssText='color:#dce9ee;background:#07151b;padding:12px;border-radius:8px;max-width:280px;line-height:1.6';
       const text=document.createElement('div');text.textContent=`${label} ${f.getProperty('officialId')} ${f.getProperty('county')}${f.getProperty('town')}。115 年版；潛勢不代表災害正在發生。`;
-      const link=document.createElement('a');link.href=`https://data.gov.tw/dataset/${f.getProperty('dataset')}`;link.target='_blank';link.rel='noreferrer';link.textContent='官方資料來源';content.append(text,link);
+      const link=document.createElement('a');link.href=`https://data.gov.tw/dataset/${f.getProperty('dataset')}`;link.target='_blank';link.rel='noreferrer';link.style.color='#79cfff';link.textContent='官方資料來源';content.append(text,link);
       info.setContent(content);info.setPosition(event.latLng);info.open({map});
     }));
     input.onchange=async()=>{
@@ -38,4 +38,5 @@ export function installGeohazardControls(map:any) {
   const controls=map.controls[google.maps.ControlPosition.TOP_LEFT];controls.push(host);
   return ()=>{disposed=true;for(const input of inputs)input.onchange=null;for(const layer of layers)layer.setMap(null);for(const l of listeners)l.remove();for(let i=controls.getLength()-1;i>=0;i--)if(controls.getAt(i)===host)controls.removeAt(i);};
 }
+
 
