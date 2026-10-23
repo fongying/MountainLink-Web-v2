@@ -89,6 +89,7 @@ export type AiRecommendation = {
   generatedAt: string;
   dispatchedAt?: string;
   dispatchError?: string;
+  delivery?: import('./ai-delivery').AiDeliveryState;
 };
 
 export type RainLevel = '超大豪雨' | '大豪雨' | '豪雨' | '大雨';

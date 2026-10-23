@@ -1,3 +1,4 @@
+import { getAiDelivery } from '$lib/server/ai-delivery';
 import { generateChineseRecommendation, AiLanguageError } from '$lib/ai-language';
 import { filterAiDevices, AI_DEVICE_MAX_AGE_DAYS } from '$lib/ai-device-freshness';
 import { validateGeohazardClaims } from '$lib/geohazard-validation';
@@ -225,7 +226,7 @@ export async function getLatestAiRecommendation() {
      ORDER BY generated_at DESC
      LIMIT 1`
   );
-  return row ? rowToRecommendation(row) : null;
+  return row ? { ...rowToRecommendation(row), delivery: await getAiDelivery(row.id) } : null;
 }
 
 function aiEnabled() {
@@ -509,7 +510,7 @@ function buildSystemPrompt() {
     '只能輸出符合 schema 的 JSON object，不要輸出 markdown 或額外文字。',
     'operatorRecommendation/recommendedAction 是給指揮中心管理者看的處置建議。',
     'message 與 meshtasticDraft 是直接發給 focusDeviceId 隊伍的 Meshtastic 短訊，必須用第二人稱或直接稱呼隊伍，不可寫成「派遣救援隊伍」這種給管理者看的命令。',
-    'Meshtastic 短訊必須包含：隊伍名稱、當地天氣或災害警示、地形或生理注意事項、請隊伍回報狀態與需求；不超過 180 個中文字。',
+    'Meshtastic 短訊必須包含：隊伍名稱、當地天氣或災害警示、地形或生理注意事項、請隊伍回報狀態與需求；整則不可超過 228 UTF-8 bytes（繁體中文建議 70 字以內，含隊名及標點）。',
     '不得宣稱未被資料證實的災害已發生；只能使用「風險升高」「高機率」「建議避開」等措辭。'
   ].join('\n');
 }
@@ -549,7 +550,8 @@ function buildPrompt(snapshot: AgentSnapshot) {
         narrativeLanguage: 'zh-TW',
         deviceMaxAgeDays: AI_DEVICE_MAX_AGE_DAYS,
         sendOnlyWhenEvidenceSupportsWarningOrCritical: true,
-        maxMessageCharacters: 180,
+        maxMessageCharacters: 70,
+        maxMessageUtf8Bytes: 228,
         targetAreasMustBeMountainAreas: true,
         focusTeamMustComeFromTeamRiskContext: true,
         meshtasticDraftAudience: 'send_to_focus_team_directly',
@@ -678,8 +680,8 @@ async function validateRecommendation(
   }
 
   const draft = meshtasticMessageForTeam(output, snapshot, evidence);
-  if (messageLength(draft) > 180) {
-    errors.push('Meshtastic 草稿不可超過 180 個中文字');
+  if (Buffer.byteLength(draft, 'utf8') > 228) {
+    errors.push('Meshtastic 草稿不可超過 228 UTF-8 bytes');
   }
 
   if (/(已發生|已坍方|已滑坡|災害已發生|確認崩塌)/u.test(draft)) {
@@ -742,7 +744,7 @@ function trimMessage(message: string, max = 180) {
 
 function meshtasticMessageForTeam(output: LlmRecommendation, snapshot: AgentSnapshot, evidence: AiRecommendationEvidence[]) {
   const raw = (output.meshtasticDraft || output.message || '').trim();
-  if (raw && !looksLikeOperatorInstruction(raw) && messageLength(raw) <= 180) return raw;
+  if (raw && !looksLikeOperatorInstruction(raw) && Buffer.byteLength(raw, 'utf8') <= 228) return raw;
 
   const team = snapshot.focusTeam;
   if (!team) return trimMessage(raw || '目前山區風險升高，請回報狀態與需求。');
@@ -923,6 +925,7 @@ async function analyze(reason: string) {
       recommendation = {
         ...recommendation,
         status: 'sent',
+        delivery: await getAiDelivery(recommendation.id),
         dispatchedAt: dispatch.dispatchedAt ?? new Date().toISOString()
       };
       await updateDispatchState(recommendation.id, recommendation.status, recommendation.dispatchedAt);

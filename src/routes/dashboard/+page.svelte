@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { deliveryText } from '$lib/ai-delivery';
   import { formatBattery, powerStatus } from '$lib/battery';
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
@@ -124,7 +125,7 @@
   }
 
   function aiStatusText(status?: AiRecommendation['status']) {
-    if (status === 'sent') return '已發送';
+    if (status === 'sent') return '已提交下行';
     if (status === 'blocked') return '驗證阻擋';
     if (status === 'failed') return '處理失敗';
     if (status === 'disabled') return 'AI 暫停';
@@ -672,7 +673,7 @@
             </div>
           {/if}
           {#if aiRecommendation.message}
-            <div class="aiMessage"><span>{aiStatusText(aiRecommendation.status)} / Meshtastic 草稿</span><p>{aiRecommendation.message}</p></div>
+            <div class="aiMessage"><span>Meshtastic 私訊草稿</span><p>{aiRecommendation.message}</p><small>{deliveryText(aiRecommendation.delivery)}</small></div>
           {/if}
           {#if aiRecommendation.targetAreas.length > 0}
             <div class="aiAreaList">{#each aiRecommendation.targetAreas as area}<span>{area}</span>{/each}</div>
