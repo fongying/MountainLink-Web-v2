@@ -20,8 +20,8 @@ broker=next(n for n in a if n.get('type')=='mqtt out' and n.get('id') in formatt
 nodes=[
  {'id':'ai_dm_receipt_in','type':'mqtt in','z':z,'name':'AI private delivery receipts','topic':'mlink/alerts/ack/!c0c31f54','qos':'1','datatype':'json','broker':broker,'nl':False,'rap':False,'inputs':0,'wires':[['ai_dm_receipt_format']]},
  {'id':'ai_dm_receipt_format','type':'function','z':z,'name':'Authenticated AI delivery receipt','outputs':1,'func':
-  "const p=msg.payload; if(msg.retain || !p || typeof p.id!=='string' || !p.id.startsWith('ai-')) return null;\n"
-  +"msg.url='http://172.18.0.1/api/ai/delivery'; msg.method='POST';\n"
+  "const p=msg.payload; if(msg.retain || !p || typeof p.id!=='string' || (!p.id.startsWith('ai-') && !p.id.startsWith('chat-'))) return null;\n"
+  +"msg.url=p.id.startsWith('chat-')?'http://172.18.0.1/api/chat/delivery':'http://172.18.0.1/api/ai/delivery'; msg.method='POST';\n"
   +"msg.headers={'Content-Type':'application/json','Host':'165.154.227.58','X-MLINK-INGEST-KEY':"+json.dumps(api_key)+"};\n"
   +"msg._receiptPayload=p; msg._receiptHeaders={...msg.headers}; msg._deliveryRetries=0; return msg;",'wires':[['ai_dm_receipt_http']]},
  {'id':'ai_dm_receipt_http','type':'http request','z':z,'name':'POST private delivery receipt','method':'use','ret':'txt','paytoqs':'ignore','url':'','persist':False,'senderr':False,'headers':[],'requestTimeout':'10000','wires':[['ai_dm_receipt_retry']]},

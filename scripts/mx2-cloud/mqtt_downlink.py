@@ -43,7 +43,7 @@ def parse_command(raw, local_node_id, now=None):
         for field in ('mappedAt', 'sampleAt'):
             if not -60 <= now - timestamp(delivery.get(field)) < MAX_MAPPING_AGE:
                 raise ValueError('expired private mapping')
-    elif destination != BROADCAST or str(body.get('id', '')).startswith('ai-') or body.get('deliveryMode') not in (None, 'broadcast'):
+    elif destination != BROADCAST or str(body.get('id', '')).startswith(('ai-', 'chat-')) or body.get('deliveryMode') not in (None, 'broadcast'):
         raise ValueError('AI must be private; no broadcast fallback')
     text = body.get('payload')
     if not isinstance(text, str) or not text.strip() or len(text.encode('utf8')) > 228:

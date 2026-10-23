@@ -18,3 +18,9 @@ test('rain/cold/earthquake remain CHAT broadcasts',()=>{
  assert.equal(p.to,4294967295);assert.equal(p.deliveryMode,'broadcast');assert.equal(p.channel,0);
  }
 });
+
+test('manual chat is private and never falls back to broadcast',()=>{
+ const p=JSON.parse(run({...base,id:'chat-test',topic:'mlink/private-chat'}).payload);
+ assert.equal(p.to,0xf6fcf190);assert.equal(p.deliveryMode,'private');
+ assert.equal(run({...base,id:'chat-test',topic:'mlink/private-chat',delivery:undefined}),null);
+});

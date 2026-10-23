@@ -1,10 +1,12 @@
 const p = msg.payload;
 if (!p || typeof p.message !== 'string' || !p.message.trim() || !p.id) return null;
 const ai = p.topic === 'mlink/agent-alerts';
-if (!ai && !['rain', 'cold', 'earthquake'].includes(p.type) && p.reason !== 'downlink_test') return null;
+const chat = p.topic === 'mlink/private-chat';
+const privateText = ai || chat;
+if (!privateText && !['rain', 'cold', 'earthquake'].includes(p.type) && p.reason !== 'downlink_test') return null;
 if (Buffer.byteLength(p.message, 'utf8') > 228) { node.warn('Downlink text exceeds radio limit'); return null; }
 let to = 4294967295;
-if (ai) {
+if (privateText) {
   const d = p.delivery;
   const fresh = v => Number.isFinite(Date.parse(v)) && Date.now()-Date.parse(v) >= -60000 && Date.now()-Date.parse(v) < 600000;
   if (!d || d.mode !== 'private' || !/^![0-9a-f]{8}$/.test(d.destination) ||
@@ -16,6 +18,6 @@ if (ai) {
 msg.topic = 'mlink/2/json/mqtt/!c0c31f54';
 msg.payload = JSON.stringify({ type: 'sendtext', from: 3234013012, to, channel: 0,
   payload: p.message, id: p.id, status: p.status || 'active',
-  deliveryMode: ai ? 'private' : 'broadcast', delivery: ai ? p.delivery : undefined,
+  deliveryMode: privateText ? 'private' : 'broadcast', delivery: privateText ? p.delivery : undefined,
   generatedAt: new Date().toISOString() });
 return msg;
