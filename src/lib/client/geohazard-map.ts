@@ -13,7 +13,7 @@ export function installGeohazardControls(map:any) {
     const input=document.createElement('input');input.type='checkbox';inputs.push(input);
     row.append(input,document.createTextNode(` ${label}`));host.append(row);
     const layer=new google.maps.Data(); layers.push(layer);
-    layer.setStyle({fillColor:color,strokeColor:color,fillOpacity:0.2,strokeWeight:2});
+    layer.setStyle({fillColor:color,strokeColor:color,fillOpacity:0.2,strokeWeight:2,zIndex:20,clickable:true});
     const info=new google.maps.InfoWindow();
     listeners.push(layer.addListener('click',(event:any)=>{
       const f=event.feature, content=document.createElement('div');content.style.cssText='color:#172633;max-width:280px;line-height:1.6';
@@ -38,3 +38,4 @@ export function installGeohazardControls(map:any) {
   const controls=map.controls[google.maps.ControlPosition.TOP_LEFT];controls.push(host);
   return ()=>{disposed=true;for(const input of inputs)input.onchange=null;for(const layer of layers)layer.setMap(null);for(const l of listeners)l.remove();for(let i=controls.getLength()-1;i>=0;i--)if(controls.getAt(i)===host)controls.removeAt(i);};
 }
+
