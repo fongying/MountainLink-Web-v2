@@ -657,6 +657,10 @@
           {#if aiRecommendation.globalSummary || aiRecommendation.reasoningSummary}
             <p class="modalLead">{aiRecommendation.globalSummary || aiRecommendation.reasoningSummary}</p>
           {/if}
+          <section class="aiAction" aria-labelledby="ai-action-title">
+            <h3 id="ai-action-title">建議動作</h3>
+            <p>{aiRecommendation.recommendedAction || aiRecommendation.teamContext?.operatorRecommendation}</p>
+          </section>
           {#if aiRecommendation.teamContext}
             <div class="aiTeamCard">
               <div class="aiTeamHead"><span>鎖定隊伍</span><strong>{aiRecommendation.teamContext.name}</strong></div>
@@ -665,7 +669,6 @@
                 <div><b>生理</b><span>{aiRecommendation.teamContext.physiologySummary}</span></div>
                 <div><b>地形</b><span>{aiRecommendation.teamContext.terrainSummary}</span></div>
               </div>
-              <p class="aiOperator">{aiRecommendation.teamContext.operatorRecommendation}</p>
             </div>
           {/if}
           {#if aiRecommendation.message}
@@ -675,7 +678,6 @@
             <div class="aiAreaList">{#each aiRecommendation.targetAreas as area}<span>{area}</span>{/each}</div>
           {/if}
           <div class="aiDetails">
-            <div><b>建議動作</b><p>{aiRecommendation.recommendedAction}</p></div>
             {#if aiRecommendation.teamContext?.movementMeters != null}
               <div><b>位移檢查</b><p>最近 {aiRecommendation.teamContext.movementWindowMinutes ?? 30} 分鐘位移約 {aiRecommendation.teamContext.movementMeters}m。</p></div>
             {/if}
@@ -1253,10 +1255,15 @@
     font-size: 11px;
   }
 
-  .aiOperator{
-    border-top: 1px solid rgba(148, 163, 184, 0.12);
-    padding-top: 7px;
+  .aiAction{
+    border: 1px solid rgba(96, 165, 250, 0.3);
+    border-left: 3px solid #60a5fa;
+    border-radius: 8px;
+    padding: 12px 14px;
+    background: rgba(96, 165, 250, 0.08);
   }
+  .aiAction h3{ margin: 0 0 6px; color: #bfdbfe; font-size: 14px; }
+  .aiAction p{ margin: 0; color: var(--text); font-size: 14px; line-height: 1.65; white-space: pre-line; overflow-wrap: anywhere; }
 
   .aiMessage{
     display: grid;
