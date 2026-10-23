@@ -1,3 +1,4 @@
+import { filterAiDevices, AI_DEVICE_MAX_AGE_DAYS } from '$lib/ai-device-freshness';
 import { validateGeohazardClaims } from '$lib/geohazard-validation';
 import { assessGeohazards, type GeoAssessment } from '$lib/geohazards';
 import { getGeohazardDataset } from '$lib/server/geohazards';
@@ -458,7 +459,7 @@ async function buildTeamRiskContext(devices: DeviceTelemetry[]) {
 async function buildSnapshot(reason: string): Promise<AgentSnapshot> {
   const labels = await listDeviceLabels();
   const units = await listDeviceUnits();
-  const devices = (await listDeviceStates()).map((device) => ({
+  const devices = filterAiDevices(await listDeviceStates()).map((device) => ({
     ...device,
     displayName: labels.get(device.deviceId) ?? device.displayName,
     unit: units.get(device.deviceId) ?? device.unit
@@ -499,6 +500,7 @@ async function buildSnapshot(reason: string): Promise<AgentSnapshot> {
 function buildSystemPrompt() {
   return [
     '官方 geohazard 是靜態大規模崩塌圖資空間比對，非即時警戒；僅 status=ok 可描述當前範圍關係。不得將潛勢說成已發生，未命中不等於安全。必須區分 potential 潛勢區與 impact 影響範圍。GPS 精度未知時邊界需確認；不得僅憑高程差判定崩塌。',
+    '裝置資料只包含最近21天內更新的紀錄；未提供的歷史裝置不可自行補入、計數或當作目前SOS。',
     '你是 MountainLink 山域安全指揮中心的受控 AI agent。',
     '你只能根據 CWA 災害警示、72 小時山區天氣預報、裝置位置、生理資訊、官方崩塌圖資比對與地形摘要提出建議。',
     '請先給全局摘要，再鎖定 teamRiskContext[0] 這支最急迫隊伍提出處置建議。',
@@ -542,6 +544,7 @@ function buildPrompt(snapshot: AgentSnapshot) {
     {
       task: '產生全局摘要，並針對 teamRiskContext[0] 這支最急迫隊伍給出操作建議。',
       outputRules: {
+        deviceMaxAgeDays: AI_DEVICE_MAX_AGE_DAYS,
         sendOnlyWhenEvidenceSupportsWarningOrCritical: true,
         maxMessageCharacters: 180,
         targetAreasMustBeMountainAreas: true,
@@ -864,7 +867,7 @@ async function analyze(reason: string) {
 
   const snapshot = await buildSnapshot(reason);
   if (!snapshot.focusTeam) {
-    const noTeam = syntheticRecommendation('watch', '目前沒有有狀況隊伍', '目前未偵測到 SOS、生理異常、離線、低電量或通訊品質差的隊伍。');
+    const noTeam = syntheticRecommendation('watch', '目前沒有有狀況隊伍', '最近21天內的裝置資料未偵測到需處理的隊伍；21天以上未更新的紀錄已排除本次AI分析。');
     await storeRecommendation(noTeam);
     return noTeam;
   }
