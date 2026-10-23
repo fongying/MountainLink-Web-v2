@@ -32,6 +32,7 @@
     history: HistoryRow[];
   };
 
+  let showGeohazards = false;
   let sseStatus: 'open' | 'error' | 'connecting' = 'connecting';
   let current: DeviceTelemetry | null = data.device ?? null;
   let timeSeries: number[] = [];
@@ -216,11 +217,11 @@
           <h2>位置地圖</h2>
           <p>鎖定裝置位置與地形視角</p>
         </div>
-        <span>Zoom 16</span>
+        <label class="geohazardToggle"><input type="checkbox" bind:checked={showGeohazards} /> 崩塌圖資</label>
       </div>
       {#if current || data.device}
         <div class="mapFrame">
-          <DeviceMap2D device={(current ?? data.device) as any} height="100%" zoom={16} lockView={true} showTerrain={true} />
+          <DeviceMap2D device={(current ?? data.device) as any} height="100%" zoom={16} lockView={true} showTerrain={true} {showGeohazards} />
         </div>
       {:else}
         <p class="empty">尚未取得裝置定位資料。</p>
@@ -382,6 +383,7 @@
 </section>
 
 <style>
+  .geohazardToggle { display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#a6beca;white-space:nowrap; }
   .deviceDetailPage{
     --bg: #020617;
     --panel: #081318;

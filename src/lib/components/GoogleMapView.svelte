@@ -16,7 +16,8 @@
 
   const dispatch = createEventDispatcher<{ select: { deviceId: string } }>();
 
-  let removeGeohazards: (() => void) | undefined;
+  export let showGeohazards = false;
+  let removeGeohazards: ReturnType<typeof installGeohazardControls> | undefined;
   let mapEl: HTMLDivElement | null = null;
   let map: google.maps.Map | null = null;
   let infoOpen = false;
@@ -289,7 +290,7 @@
           mapTypeId: showContours ? 'terrain' : 'roadmap'
         });
 
-        removeGeohazards = installGeohazardControls(map);
+        removeGeohazards = installGeohazardControls(map, showGeohazards);
         ensureInfoWindow();
         loadBoundaryLayer();
         syncAlertRegions();
@@ -332,6 +333,7 @@
   $: if (map) {
     map.setMapTypeId(showContours ? 'terrain' : 'roadmap');
   }
+  $: removeGeohazards?.setVisible(showGeohazards);
 </script>
 
 <div class="mapShell">

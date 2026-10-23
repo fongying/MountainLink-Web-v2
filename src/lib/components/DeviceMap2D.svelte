@@ -11,7 +11,8 @@
   export let lockView = true;
   export let showTerrain = false;
 
-  let removeGeohazards: (() => void) | undefined;
+  export let showGeohazards = false;
+  let removeGeohazards: ReturnType<typeof installGeohazardControls> | undefined;
   let mapEl: HTMLDivElement | null = null;
   let map: google.maps.Map | null = null;
   let marker: google.maps.Marker | null = null;
@@ -114,7 +115,7 @@
       mapTypeId: showTerrain ? 'terrain' : 'roadmap'
     });
 
-    removeGeohazards ??= installGeohazardControls(map);
+    removeGeohazards ??= installGeohazardControls(map, showGeohazards);
     applyLockOptions();
 
     marker = new google.maps.Marker({
@@ -170,6 +171,7 @@
   $: if (map) {
     syncView();
   }
+  $: removeGeohazards?.setVisible(showGeohazards);
 </script>
 
 <div style={`height:${typeof height === 'number' ? `${height}px` : height}; box-sizing:border-box; border:1px solid #ddd; border-radius:12px; overflow:hidden;`}>

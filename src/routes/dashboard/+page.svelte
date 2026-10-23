@@ -1,4 +1,4 @@
-﻿<script lang="ts">
+<script lang="ts">
   import { formatBattery, powerStatus } from '$lib/battery';
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
@@ -20,6 +20,7 @@
   let riskQueue: RiskQueueItem[] = data.riskQueue;
   let mode: '2d' | '3d' = '2d';
   let showContours = false;
+  let showGeohazards = false;
   let sseStatus: 'open' | 'error' | 'connecting' = 'connecting';
   let hazardItems: AlertItem[] = [];
   let hazardLoading = true;
@@ -487,6 +488,10 @@
               <input type="checkbox" bind:checked={showContours} />
               地形
             </label>
+            <label class="terrainToggle">
+              <input type="checkbox" bind:checked={showGeohazards} />
+              崩塌圖資
+            </label>
           {/if}
         </div>
       </div>
@@ -504,7 +509,7 @@
 
       <div class="mapViewport">
         {#if mode === '2d'}
-          <GoogleMapView {devices} alertRegions={mapAlertRegions} height={460} {showContours} on:select={onSelect} />
+          <GoogleMapView {devices} alertRegions={mapAlertRegions} height={460} {showContours} {showGeohazards} on:select={onSelect} />
         {:else}
           <GoogleMap3DView {devices} height={460} on:select={onSelect} />
         {/if}
@@ -958,6 +963,8 @@
 
   .mapControls{
     display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
     align-items: center;
     gap: 8px;
   }

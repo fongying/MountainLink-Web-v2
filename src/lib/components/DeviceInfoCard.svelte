@@ -1,5 +1,5 @@
-﻿<script lang="ts">
-  import { formatBattery, powerStatus } from '$lib/battery';
+<script lang="ts">
+  import { formatBattery } from '$lib/battery';
   import type { DeviceTelemetry } from '$lib/types';
 
   export let device: DeviceTelemetry;
@@ -11,10 +11,10 @@
   function coordText(d: DeviceTelemetry) {
     const lat = typeof d.lat === 'number' ? d.lat : Number(d.lat);
     const lon = typeof d.lon === 'number' ? d.lon : Number(d.lon);
-    const ok = Number.isFinite(lat) && Number.isFinite(lon);
+    const ok = d.lat != null && d.lon != null && Number.isFinite(lat) && Number.isFinite(lon);
     if (!ok) return '—';
-    const alt = typeof d.alt === 'number' ? d.alt : Number(d.alt);
-    const altTxt = Number.isFinite(alt) ? ` (alt ${alt.toFixed(1)}m)` : '';
+    const alt = d.alt == null ? NaN : Number(d.alt);
+    const altTxt = Number.isFinite(alt) ? ` · ${alt.toFixed(1)}m` : '';
     return `${lat.toFixed(6)}, ${lon.toFixed(6)}${altTxt}`;
   }
 
@@ -24,6 +24,9 @@
     return new Date(t).toLocaleString();
   }
 
+  $: gpsState = device.mx2GpsValid === false ? 'invalid' : device.mx2GpsValid === true ? (device.mx2PositionTs && Date.now() - device.mx2PositionTs > 600000 ? 'stale' : 'valid') : 'unknown';
+  $: gpsLabel = gpsState === 'valid' ? 'GPS 有效' : gpsState === 'invalid' ? 'GPS 無效，顯示最後有效位置' : gpsState === 'stale' ? 'GPS 定位已超過 10 分鐘' : 'GPS 狀態未提供';
+  $: positionTime = device.mx2PositionTs ? new Date(device.mx2PositionTs).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}) : '';
   $: unitText = (device as { unit?: string }).unit ?? '登山者';
   $: displayTitle = device.displayName?.trim() || device.deviceId;
   $: deviceIdText = device.displayName?.trim() ? device.deviceId : '';
@@ -71,14 +74,16 @@
         <span>{unitText}</span>
       </div>
       <div class:activeSos={device.sos} class="statusBadge">{sosText}</div>
+      <span class={`gpsIcon ${gpsState}`} role="img" aria-label={gpsLabel} title={gpsLabel}>
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="7"/><path d="M12 1v4m0 14v4M1 12h4m14 0h4"/>{#if gpsState==='valid'}<path d="m8 12 3 3 5-6"/>{:else if gpsState==='invalid'}<path d="m9 9 6 6m0-6-6 6"/>{:else}<path d="M12 8v5m0 2v1"/>{/if}</svg>
+      </span>
     </div>
 
+    <div class="positionLine">
+      <span class="coordinates">{coordText(device)}</span>
+      {#if positionTime}<small title={device.mx2PositionTs ? new Date(device.mx2PositionTs).toLocaleString() : ''}>定位 {positionTime}</small>{/if}
+    </div>
     <div class="grid">
-      <div class="wide"><b>座標</b><span>{coordText(device)}</span></div>
-      {#if device.mx2GpsValid !== undefined}
-        <div class="wide"><b>GPS</b><span>{device.mx2GpsValid ? '有效' : '無效，顯示最後有效位置'}</span></div>
-        <div class="wide"><b>定位時間</b><span>{device.mx2PositionTs ? new Date(device.mx2PositionTs).toLocaleString() : '尚無有效定位'}</span></div>
-      {/if}
       <div><b>心率</b><span>{hrText}</span></div>
       <div><b>血氧</b><span>{spo2Text}</span></div>
       <div><b>血壓</b><span>{bpText}</span></div>
@@ -104,11 +109,14 @@
     position: relative;
     width: 292px;
     max-width: calc(100vw - 48px);
+    max-height: min(360px, calc(100dvh - 96px));
+    box-sizing: border-box;
     border-radius: 10px;
     border: 1px solid rgba(96, 165, 250, 0.42);
     background: #07151b;
     color: #edf7fb;
-    overflow: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
     font-family: "IBM Plex Sans", "Noto Sans TC", sans-serif;
     box-shadow: 0 18px 34px rgba(0, 0, 0, 0.38);
   }
@@ -157,7 +165,7 @@
   }
 
   .deviceId{
-    margin: 0 0 8px 0;
+    margin: 0 0 4px 0;
     font-size: 12px;
     color: #93a4ad;
   }
@@ -167,7 +175,7 @@
     align-items: center;
     gap: 6px;
     flex-wrap: wrap;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
   }
 
   .unitBadge,
@@ -243,7 +251,7 @@
 
   .grid{
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 5px;
     font-size: 12px;
     color: #d7e8ee;
@@ -259,9 +267,15 @@
     background: rgba(255, 255, 255, 0.035);
   }
 
-  .grid .wide{
-    grid-column: 1 / -1;
-  }
+  .positionLine { display:grid;gap:3px;margin-bottom:6px;padding:5px 7px;border:1px solid rgba(148,163,184,.12);border-radius:7px; }
+  .coordinates {font-size:11px;overflow-wrap:anywhere;line-height:1.35;font-variant-numeric:tabular-nums;}
+  .positionLine small {font-size:10px;color:#9eb0b8;}
+  .gpsIcon {display:inline-flex;align-items:center;justify-content:center;width:25px;height:25px;box-sizing:border-box;border:1px solid currentColor;border-radius:50%;color:#a6beca;flex-shrink:0;}
+  .gpsIcon.valid {color:#6ee7a0;background:rgba(34,197,94,.12);}
+  .gpsIcon.invalid {color:#fca5a5;background:rgba(239,68,68,.12);}
+  .gpsIcon.stale {color:#fcd34d;background:rgba(245,158,11,.12);}
+  .gpsIcon.unknown {color:#a6beca;}
+
 
   .grid b{
     color: #91c9f7;
