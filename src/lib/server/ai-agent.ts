@@ -1,3 +1,11 @@
+import { getAiDelivery } from '$lib/server/ai-delivery';
+import { generateChineseRecommendation, AiLanguageError } from '$lib/ai-language';
+import { filterAiDevices, AI_DEVICE_MAX_AGE_DAYS } from '$lib/ai-device-freshness';
+import { validateGeohazardClaims } from '$lib/geohazard-validation';
+import { assessGeohazards, type GeoAssessment } from '$lib/geohazards';
+import { getGeohazardDataset } from '$lib/server/geohazards';
+import { constrainRecommendationSchema } from '$lib/server/ollama-json';
+import { readAiSettings } from '$lib/server/ai-settings';
 ﻿import { createHash, randomUUID } from 'node:crypto';
 import { env } from '$env/dynamic/private';
 import type {
@@ -10,7 +18,7 @@ import type {
   MountainForecastLocation
 } from '$lib/types';
 import type { AlertItem } from '$lib/types/alerts';
-import { isMountainArea } from '$lib/mountain-areas';
+import { isMountainArea, MOUNTAIN_FORECAST_LOCATIONS } from '$lib/mountain-areas';
 import { getUnifiedHazardSnapshot } from '$lib/server/hazards';
 import { getMountainForecastSnapshotCached } from '$lib/server/forecast';
 import { listDeviceStates } from '$lib/server/device-telemetry';
@@ -58,7 +66,7 @@ type TeamRiskContext = {
   riskReasons: string[];
   online: boolean;
   sos?: boolean;
-  battery: number;
+  battery?: number | null;
   charging?: boolean;
   lat?: number;
   lon?: number;
@@ -69,6 +77,7 @@ type TeamRiskContext = {
   snr?: number;
   physiologicalAbnormalities: string[];
   terrain: TerrainSummary;
+  geohazard: GeoAssessment;
 };
 
 type LlmRecommendation = {
@@ -217,7 +226,7 @@ export async function getLatestAiRecommendation() {
      ORDER BY generated_at DESC
      LIMIT 1`
   );
-  return row ? rowToRecommendation(row) : null;
+  return row ? { ...rowToRecommendation(row), delivery: await getAiDelivery(row.id) } : null;
 }
 
 function aiEnabled() {
@@ -233,7 +242,7 @@ function autoDispatchEnabled() {
 }
 
 function aiProvider(): 'ollama' | 'nvidia' {
-  return env.AI_AGENT_PROVIDER === 'nvidia' ? 'nvidia' : 'ollama';
+  return readAiSettings().provider;
 }
 
 function activeModel() {
@@ -347,7 +356,7 @@ function scoreDeviceRisk(device: DeviceTelemetry) {
     score += 30;
     reasons.push('離線');
   }
-  if (device.battery <= 20) {
+  if (device.battery != null && device.battery <= 20) {
     score += 18;
     reasons.push(`低電量 ${device.battery}%`);
   }
@@ -393,6 +402,13 @@ function buildTerrainEvidence(team?: TeamRiskContext) {
       label: `${team.name} 地形摘要`,
       detail: team.terrain.summary.slice(0, 260),
       severity: team.terrain.status === 'queried' ? 'watch' : 'info'
+    } satisfies AgentEvidence,
+    {
+      id: `geohazard:${team.deviceId}`,
+      source: 'terrain',
+      label: `${team.name} 官方大規模崩塌圖資（${team.geohazard.year ?? '未知'} 年版）`,
+      detail: `${team.geohazard.summary} ${team.geohazard.matches.map(m=>`${m.officialId} ${m.kind} ${m.relation} 距邊界約${m.distanceMeters}m https://data.gov.tw/dataset/${m.dataset}`).join('；')}`.slice(0, 700),
+      severity: 'info'
     } satisfies AgentEvidence
   ];
 }
@@ -436,6 +452,7 @@ async function buildTeamRiskContext(devices: DeviceTelemetry[]) {
       rssi: device.rssi,
       snr: device.snr,
       physiologicalAbnormalities: risk.physiology,
+      geohazard: assessGeohazards(device, getGeohazardDataset()),
       terrain
     };
   });
@@ -444,7 +461,7 @@ async function buildTeamRiskContext(devices: DeviceTelemetry[]) {
 async function buildSnapshot(reason: string): Promise<AgentSnapshot> {
   const labels = await listDeviceLabels();
   const units = await listDeviceUnits();
-  const devices = (await listDeviceStates()).map((device) => ({
+  const devices = filterAiDevices(await listDeviceStates()).map((device) => ({
     ...device,
     displayName: labels.get(device.deviceId) ?? device.displayName,
     unit: units.get(device.deviceId) ?? device.unit
@@ -484,13 +501,16 @@ async function buildSnapshot(reason: string): Promise<AgentSnapshot> {
 
 function buildSystemPrompt() {
   return [
+    '官方 geohazard 是靜態大規模崩塌圖資空間比對，非即時警戒；僅 status=ok 可描述當前範圍關係。不得將潛勢說成已發生，未命中不等於安全。必須區分 potential 潛勢區與 impact 影響範圍。GPS 精度未知時邊界需確認；不得僅憑高程差判定崩塌。',
+    '裝置資料只包含最近21天內更新的紀錄；未提供的歷史裝置不可自行補入、計數或當作目前SOS。',
+    '輸出語言固定為臺灣繁體中文（zh-TW）。title、globalSummary、teamSituationSummary、physiologySummary、terrainSummary、operatorRecommendation、recommendedAction、reasoningSummary、message、meshtasticDraft等所有敘述值都必須使用繁體中文，禁止英文段落與簡體中文。JSON欄位名稱、列舉值、裝置ID、證據ID、單位與專有名詞保留原文。',
     '你是 MountainLink 山域安全指揮中心的受控 AI agent。',
-    '你只能根據 CWA 災害警示、72 小時山區天氣預報、裝置位置、生理資訊與地形摘要提出建議。',
+    '你只能根據 CWA 災害警示、72 小時山區天氣預報、裝置位置、生理資訊、官方崩塌圖資比對與地形摘要提出建議。',
     '請先給全局摘要，再鎖定 teamRiskContext[0] 這支最急迫隊伍提出處置建議。',
     '只能輸出符合 schema 的 JSON object，不要輸出 markdown 或額外文字。',
     'operatorRecommendation/recommendedAction 是給指揮中心管理者看的處置建議。',
     'message 與 meshtasticDraft 是直接發給 focusDeviceId 隊伍的 Meshtastic 短訊，必須用第二人稱或直接稱呼隊伍，不可寫成「派遣救援隊伍」這種給管理者看的命令。',
-    'Meshtastic 短訊必須包含：隊伍名稱、當地天氣或災害警示、地形或生理注意事項、請隊伍回報狀態與需求；不超過 180 個中文字。',
+    'Meshtastic 短訊必須包含：隊伍名稱、當地天氣或災害警示、地形或生理注意事項、請隊伍回報狀態與需求；整則不可超過 228 UTF-8 bytes（繁體中文建議 70 字以內，含隊名及標點）。',
     '不得宣稱未被資料證實的災害已發生；只能使用「風險升高」「高機率」「建議避開」等措辭。'
   ].join('\n');
 }
@@ -527,8 +547,11 @@ function buildPrompt(snapshot: AgentSnapshot) {
     {
       task: '產生全局摘要，並針對 teamRiskContext[0] 這支最急迫隊伍給出操作建議。',
       outputRules: {
+        narrativeLanguage: 'zh-TW',
+        deviceMaxAgeDays: AI_DEVICE_MAX_AGE_DAYS,
         sendOnlyWhenEvidenceSupportsWarningOrCritical: true,
-        maxMessageCharacters: 180,
+        maxMessageCharacters: 70,
+        maxMessageUtf8Bytes: 228,
         targetAreasMustBeMountainAreas: true,
         focusTeamMustComeFromTeamRiskContext: true,
         meshtasticDraftAudience: 'send_to_focus_team_directly',
@@ -553,6 +576,7 @@ function buildPrompt(snapshot: AgentSnapshot) {
         rssi: team.rssi,
         snr: team.snr,
         physiologicalAbnormalities: team.physiologicalAbnormalities,
+        geohazard: team.geohazard,
         terrain: team.terrain
       })),
       focusDeviceId: snapshot.focusTeam?.deviceId ?? null,
@@ -621,6 +645,18 @@ async function validateRecommendation(
 ) {
   const errors: string[] = [];
   const severity = normalizeSeverity(output.severity);
+  if (snapshot.focusTeam) {
+    const geo = snapshot.focusTeam.geohazard;
+    errors.push(...validateGeohazardClaims([
+      output.teamSituationSummary ?? '', output.terrainSummary ?? '', output.meshtasticDraft ?? '', output.message ?? ''
+    ], geo));
+    errors.push(...validateGeohazardClaims([
+      output.globalSummary ?? '', output.reasoningSummary ?? ''
+    ], { ...geo, status: 'ok', matches: snapshot.teamRiskContext.filter(t=>t.geohazard.status === 'ok').flatMap(t=>t.geohazard.matches) }));
+    if (output.send && geo.status !== 'ok') {
+      errors.push('焦點隊伍沒有有效且未過期的定位，禁止自動發送以所在地為依據的災害建議，請先人工確認位置。');
+    }
+  }
 
   if (!snapshot.focusTeam) errors.push('目前沒有可鎖定的有狀況隊伍');
   if (snapshot.focusTeam && output.focusDeviceId !== snapshot.focusTeam.deviceId) {
@@ -644,8 +680,8 @@ async function validateRecommendation(
   }
 
   const draft = meshtasticMessageForTeam(output, snapshot, evidence);
-  if (messageLength(draft) > 180) {
-    errors.push('Meshtastic 草稿不可超過 180 個中文字');
+  if (Buffer.byteLength(draft, 'utf8') > 228) {
+    errors.push('Meshtastic 草稿不可超過 228 UTF-8 bytes');
   }
 
   if (/(已發生|已坍方|已滑坡|災害已發生|確認崩塌)/u.test(draft)) {
@@ -669,7 +705,7 @@ function teamContextFromOutput(output: LlmRecommendation, focusTeam?: TeamRiskCo
     unit: focusTeam.unit,
     situationSummary: (output.teamSituationSummary || focusTeam.riskReasons.join('、')).trim().slice(0, 220),
     physiologySummary: (output.physiologySummary || physiologyFallback).trim().slice(0, 220),
-    terrainSummary: (output.terrainSummary || focusTeam.terrain.summary).trim().slice(0, 260),
+    terrainSummary: `${focusTeam.geohazard.summary}；${focusTeam.terrain.summary}`.trim().slice(0, 520),
     operatorRecommendation: (output.operatorRecommendation || output.recommendedAction || '持續監控隊伍狀態並確認通訊。').trim().slice(0, 260),
     movementMeters: focusTeam.terrain.movementMeters,
     movementWindowMinutes: focusTeam.terrain.movementWindowMinutes
@@ -688,8 +724,8 @@ function alertLabelFromEvidence(evidence: AiRecommendationEvidence[]) {
 
 function terrainWarningText(summary?: string) {
   if (!summary) return '請注意地形風險';
-  if (/高差大|陡坡|崩塌|坍塌|地形陡峭|行動需保守/.test(summary)) {
-    return '周邊地形陡峭，請注意坍塌與落石風險';
+  if (/高差大|陡坡|地形陡峭|行動需保守/.test(summary)) {
+    return '周邊高差較大，請確認實際路線及地面狀況';
   }
   if (/明顯起伏|確認路線|高差/.test(summary)) {
     return '周邊地形起伏明顯，請確認路線安全';
@@ -708,7 +744,7 @@ function trimMessage(message: string, max = 180) {
 
 function meshtasticMessageForTeam(output: LlmRecommendation, snapshot: AgentSnapshot, evidence: AiRecommendationEvidence[]) {
   const raw = (output.meshtasticDraft || output.message || '').trim();
-  if (raw && !looksLikeOperatorInstruction(raw) && messageLength(raw) <= 180) return raw;
+  if (raw && !looksLikeOperatorInstruction(raw) && Buffer.byteLength(raw, 'utf8') <= 228) return raw;
 
   const team = snapshot.focusTeam;
   if (!team) return trimMessage(raw || '目前山區風險升高，請回報狀態與需求。');
@@ -836,7 +872,7 @@ async function analyze(reason: string) {
 
   const snapshot = await buildSnapshot(reason);
   if (!snapshot.focusTeam) {
-    const noTeam = syntheticRecommendation('watch', '目前沒有有狀況隊伍', '目前未偵測到 SOS、生理異常、離線、低電量或通訊品質差的隊伍。');
+    const noTeam = syntheticRecommendation('watch', '目前沒有有狀況隊伍', '最近21天內的裝置資料未偵測到需處理的隊伍；21天以上未更新的紀錄已排除本次AI分析。');
     await storeRecommendation(noTeam);
     return noTeam;
   }
@@ -847,14 +883,21 @@ async function analyze(reason: string) {
     const request = {
       system: buildSystemPrompt(),
       prompt: buildPrompt(snapshot),
-      schema: AI_RECOMMENDATION_SCHEMA
+      schema: provider === 'ollama' ? constrainRecommendationSchema(AI_RECOMMENDATION_SCHEMA, {
+        focusDeviceId: snapshot.focusTeam!.deviceId,
+        evidenceIds: snapshot.evidence.map(item => item.id),
+        targetAreas: MOUNTAIN_FORECAST_LOCATIONS.map(area => `${area.county}${area.town}`)
+      }) : AI_RECOMMENDATION_SCHEMA
     };
-    llmResult = provider === 'nvidia' ? await generateNvidiaJson(request) : await generateOllamaJson(request);
+    llmResult = await generateChineseRecommendation(async (feedback) => {
+      const localizedRequest = feedback ? { ...request, system: `${request.system}\n${feedback}`, prompt: JSON.stringify({ ...JSON.parse(request.prompt), languageCorrection: feedback }) } : request;
+      return provider === 'nvidia' ? await generateNvidiaJson(localizedRequest) : await generateOllamaJson(localizedRequest);
+    });
   } catch (error) {
     const failed = syntheticRecommendation(
       'failed',
-      'AI 分析失敗',
-      provider === 'nvidia' ? 'NVIDIA API 回應失敗，無法產生分析。' : 'Ollama 回應失敗，無法產生分析。',
+      error instanceof AiLanguageError ? 'AI 回覆語言不符' : 'AI 分析失敗',
+      error instanceof AiLanguageError ? 'AI 重試後仍未使用繁體中文，本次報告未發布或發送。' : provider === 'nvidia' ? 'NVIDIA API 回應失敗，無法產生分析。' : 'Ollama 回應失敗，無法產生分析。',
       error instanceof Error ? error.message : `unknown ${provider} error`
     );
     await storeRecommendation(failed);
@@ -882,13 +925,14 @@ async function analyze(reason: string) {
       recommendation = {
         ...recommendation,
         status: 'sent',
+        delivery: await getAiDelivery(recommendation.id),
         dispatchedAt: dispatch.dispatchedAt ?? new Date().toISOString()
       };
       await updateDispatchState(recommendation.id, recommendation.status, recommendation.dispatchedAt);
     } else if (!dispatch.skipped) {
       recommendation = {
         ...recommendation,
-        status: 'failed',
+        status: dispatch.error?.startsWith('私訊阻擋') ? 'blocked' : 'failed',
         dispatchError: dispatch.error ?? 'dispatch failed'
       };
       await updateDispatchState(recommendation.id, recommendation.status, undefined, recommendation.dispatchError);

@@ -2,7 +2,7 @@ import { env } from '$env/dynamic/private';
 import type { DeviceTelemetry } from '$lib/types';
 import { db } from '$lib/server/db';
 
-const ONLINE_WINDOW_MS = 5 * 60 * 1000;
+const ONLINE_WINDOW_MS = 10 * 60 * 1000;
 
 type DeviceStateRow = {
   device_id: string;
@@ -28,6 +28,12 @@ type DeviceStateRow = {
   rssi: number | null;
   snr: number | null;
   raw_text: string | null;
+  mx2_battery_raw?: number | null;
+  mx2_battery_ts?: number | null;
+  mx2_gps_valid?: number | null;
+  mx2_position_ts?: number | null;
+  mx2_sample_ts?: number | null;
+  mx2_data_source?: string | null;
   raw_json: string | null;
 };
 
@@ -46,6 +52,7 @@ type TelemetryHistoryRow = {
   bpHi: number | null;
   bpLo: number | null;
   bt: number | null;
+  mx2BatteryRaw?: number | null;
 };
 
 const DEMO_DEVICE_IDS = ['NT-DEMO-001', 'NT-DEMO-002'] as const;
@@ -178,9 +185,15 @@ function toEpochMs(value: unknown): number | undefined {
 function rowToDeviceTelemetry(row: DeviceStateRow, now = Date.now()): DeviceTelemetry {
   return {
     deviceId: row.device_id,
+    mx2BatteryRaw: row.mx2_battery_raw ?? undefined,
+    mx2BatteryTs: row.mx2_battery_ts ?? undefined,
+    mx2GpsValid: row.mx2_gps_valid == null ? undefined : Boolean(row.mx2_gps_valid),
+    mx2PositionTs: row.mx2_position_ts ?? undefined,
+    mx2SampleTs: row.mx2_sample_ts ?? undefined,
+    mx2DataSource: row.mx2_data_source ?? undefined,
     online: now - row.updated_at <= ONLINE_WINDOW_MS,
-    battery: row.battery ?? 0,
-    charging: Boolean(row.charging),
+    battery: row.mx2_battery_raw != null && row.mx2_battery_raw > 100 ? null : row.battery ?? undefined,
+    charging: row.mx2_sample_ts != null ? undefined : Boolean(row.charging),
     hr: row.hr ?? undefined,
     lat: row.lat ?? undefined,
     lon: row.lon ?? undefined,
@@ -397,9 +410,7 @@ export async function ingestTelemetryPayload(input: LegacyTelemetryIn | NodeRedT
 
 export async function listDeviceStates() {
   const rows = await getAll<DeviceStateRow>(
-    `SELECT device_id, updated_at, recv_ts, packet_id, sender, from_node, channel, hops_away, hop_start,
-            hr, battery, charging, spo2, bp_hi, bp_lo, bt, lat, lon, alt, sos, rssi, snr, raw_text, raw_json
-     FROM device_state
+    `SELECT * FROM device_state
      ORDER BY updated_at DESC, device_id ASC`
   );
   const now = Date.now();
@@ -411,9 +422,7 @@ export async function listDeviceStates() {
 
 export async function getDeviceState(deviceId: string) {
   const row = await getOne<DeviceStateRow>(
-    `SELECT device_id, updated_at, recv_ts, packet_id, sender, from_node, channel, hops_away, hop_start,
-            hr, battery, charging, spo2, bp_hi, bp_lo, bt, lat, lon, alt, sos, rssi, snr, raw_text, raw_json
-     FROM device_state
+    `SELECT * FROM device_state
      WHERE device_id = ?`,
     [deviceId]
   );
@@ -425,7 +434,7 @@ export async function getDeviceState(deviceId: string) {
 export async function listDeviceHistory(deviceId: string, limit: number) {
   return getAll<TelemetryHistoryRow>(
     `SELECT device_id as deviceId, ts, hr, battery, lat, lon, alt, sos, rssi, snr,
-            spo2, bp_hi as bpHi, bp_lo as bpLo, bt
+            spo2, bp_hi as bpHi, bp_lo as bpLo, bt, json_extract(raw_json,'$.battery_raw') as mx2BatteryRaw
      FROM telemetry_history
      WHERE device_id = ?
      ORDER BY ts DESC

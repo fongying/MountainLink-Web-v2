@@ -1,4 +1,5 @@
-﻿<script lang="ts">
+<script lang="ts">
+  import { installGeohazardControls } from '$lib/client/geohazard-map';
   import { onMount } from 'svelte';
   import type { DeviceTelemetry } from '$lib/types';
   import { importGmapsLibrary } from '$lib/client/gmaps';
@@ -10,6 +11,8 @@
   export let lockView = true;
   export let showTerrain = false;
 
+  export let showGeohazards = false;
+  let removeGeohazards: ReturnType<typeof installGeohazardControls> | undefined;
   let mapEl: HTMLDivElement | null = null;
   let map: google.maps.Map | null = null;
   let marker: google.maps.Marker | null = null;
@@ -20,7 +23,7 @@
   }
 
   function getLatLng(d: DeviceTelemetry | null): { lat: number; lng: number } | null {
-    if (!d) return null;
+    if (!d || d.lat == null || d.lon == null) return null;
     const lat = toNum(d.lat);
     const lng = toNum(d.lon);
     if (lat == null || lng == null) return null;
@@ -112,6 +115,7 @@
       mapTypeId: showTerrain ? 'terrain' : 'roadmap'
     });
 
+    removeGeohazards ??= installGeohazardControls(map, showGeohazards);
     applyLockOptions();
 
     marker = new google.maps.Marker({
@@ -157,6 +161,7 @@
 
     return () => {
       disposed = true;
+      removeGeohazards?.();
       marker?.setMap(null);
       marker = null;
       map = null;
@@ -166,6 +171,7 @@
   $: if (map) {
     syncView();
   }
+  $: removeGeohazards?.setVisible(showGeohazards);
 </script>
 
 <div style={`height:${typeof height === 'number' ? `${height}px` : height}; box-sizing:border-box; border:1px solid #ddd; border-radius:12px; overflow:hidden;`}>

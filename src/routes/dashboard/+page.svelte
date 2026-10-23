@@ -1,4 +1,6 @@
-﻿<script lang="ts">
+<script lang="ts">
+  import { deliveryText } from '$lib/ai-delivery';
+  import { formatBattery, powerStatus } from '$lib/battery';
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import type { AiRecommendation, DeviceTelemetry, MLinkSseEvent } from '$lib/types';
@@ -19,6 +21,7 @@
   let riskQueue: RiskQueueItem[] = data.riskQueue;
   let mode: '2d' | '3d' = '2d';
   let showContours = false;
+  let showGeohazards = false;
   let sseStatus: 'open' | 'error' | 'connecting' = 'connecting';
   let hazardItems: AlertItem[] = [];
   let hazardLoading = true;
@@ -70,14 +73,14 @@
   const deviceTitle = (d: DeviceTelemetry) => d.displayName?.trim() || d.deviceId;
   const deviceHref = (deviceId?: string | null) => (deviceId ? `/devices/${encodeURIComponent(deviceId)}` : '/dashboard');
   const applicationHref = (applicationId?: number | null) => (applicationId ? `/apply/${applicationId}` : '/apply');
-  const batteryText = (d: DeviceTelemetry) => `${d.battery}%${d.charging ? ' 充電中' : ''}`;
+  const batteryText = formatBattery;
 
   $: deviceById = new Map(devices.map((device) => [device.deviceId, device]));
   $: onlineCount = devices.filter((device) => device.online).length;
   $: sosDevices = devices.filter((device) => device.sos);
-  $: lowBatteryDevices = devices.filter((device) => device.battery <= 20);
+  $: lowBatteryDevices = devices.filter((device) => device.battery != null && device.battery <= 20);
   $: offlineDevices = devices.filter((device) => !device.online);
-  $: normalDevices = devices.filter((device) => !device.sos && device.online && device.battery > 20);
+  $: normalDevices = devices.filter((device) => !device.sos && device.online && (device.battery == null || device.battery > 20));
   $: highRiskItems = devices
     .map((device): PhysiologicalRiskItem => ({ device, abnormalities: physiologicalAbnormalities(device) }))
     .filter((item) => item.abnormalities.length > 0);
@@ -122,7 +125,7 @@
   }
 
   function aiStatusText(status?: AiRecommendation['status']) {
-    if (status === 'sent') return '已發送';
+    if (status === 'sent') return '已提交下行';
     if (status === 'blocked') return '驗證阻擋';
     if (status === 'failed') return '處理失敗';
     if (status === 'disabled') return 'AI 暫停';
@@ -347,7 +350,7 @@
         {
           deviceId: evt.deviceId,
           online: evt.online,
-          battery: devices.find((d) => d.deviceId === evt.deviceId)?.battery ?? 0,
+          battery: devices.find((d) => d.deviceId === evt.deviceId)?.battery,
           updatedAt: evt.updatedAt
         }
       ]);
@@ -486,6 +489,10 @@
               <input type="checkbox" bind:checked={showContours} />
               地形
             </label>
+            <label class="terrainToggle">
+              <input type="checkbox" bind:checked={showGeohazards} />
+              崩塌圖資
+            </label>
           {/if}
         </div>
       </div>
@@ -495,11 +502,15 @@
         <span><i class="tri"></i>SOS</span>
         <span><i class="dot blue"></i>搜救</span>
         <span><i class="dot orange"></i>警消</span>
+        <i class="legendDivider" aria-hidden="true"></i>
+        <span><i class="hazardSwatch rain"></i>豪雨／大雨</span>
+        <span><i class="hazardSwatch cold"></i>低溫</span>
+        <span><i class="hazardSwatch earthquake"></i>地震</span>
       </div>
 
       <div class="mapViewport">
         {#if mode === '2d'}
-          <GoogleMapView {devices} alertRegions={mapAlertRegions} height={460} {showContours} on:select={onSelect} />
+          <GoogleMapView {devices} alertRegions={mapAlertRegions} height={460} {showContours} {showGeohazards} on:select={onSelect} />
         {:else}
           <GoogleMap3DView {devices} height={460} on:select={onSelect} />
         {/if}
@@ -519,22 +530,22 @@
       {:else}
         <div class="riskList combinedRiskList">
           {#if sosDevices.length > 0}
-            <div class="riskGroup">
-              <div class="riskGroupHead danger"><strong>SOS</strong><span>{sosDevices.length}</span></div>
-              {#each sosDevices.slice(0, 3) as device}
+            <details open class="riskGroup">
+              <summary class="riskGroupHead danger"><strong>SOS</strong><span>{sosDevices.length}</span></summary>
+              {#each sosDevices as device}
                 <a class="riskItem danger" href={`/devices/${encodeURIComponent(device.deviceId)}`}>
                   <span>SOS</span>
                   <strong>{deviceTitle(device)}</strong>
                   <small>{unitOf(device)} / {device.online ? 'Online' : 'Offline'} / {fmtTime(device.updatedAt)}</small>
                 </a>
               {/each}
-            </div>
+            </details>
           {/if}
 
           {#if highRiskItems.length > 0}
-            <div class="riskGroup">
-              <div class="riskGroupHead critical"><strong>生理異常</strong><span>{highRiskItems.length}</span></div>
-              {#each highRiskItems.slice(0, 4) as item}
+            <details open class="riskGroup">
+              <summary class="riskGroupHead critical"><strong>生理異常</strong><span>{highRiskItems.length}</span></summary>
+              {#each highRiskItems as item}
                 <a class="riskItem critical" href={`/devices/${encodeURIComponent(item.device.deviceId)}`}>
                   <span>{item.abnormalities.length} 項</span>
                   <strong>{deviceTitle(item.device)}</strong>
@@ -542,33 +553,33 @@
                   <em>{item.abnormalities.join('、')}</em>
                 </a>
               {/each}
-            </div>
+            </details>
           {/if}
 
           {#if lowBatteryDevices.length > 0}
-            <div class="riskGroup compactGroup">
-              <div class="riskGroupHead warn"><strong>低電量</strong><span>{lowBatteryDevices.length}</span></div>
-              {#each lowBatteryDevices.slice(0, 3) as device}
+            <details open class="riskGroup compactGroup">
+              <summary class="riskGroupHead warn"><strong>低電量</strong><span>{lowBatteryDevices.length}</span></summary>
+              {#each lowBatteryDevices as device}
                 <a class="riskItem warn" href={`/devices/${encodeURIComponent(device.deviceId)}`}>
                   <span>{batteryText(device)}</span>
                   <strong>{deviceTitle(device)}</strong>
                   <small>{unitOf(device)} / {fmtTime(device.updatedAt)}</small>
                 </a>
               {/each}
-            </div>
+            </details>
           {/if}
 
           {#if offlineDevices.length > 0}
-            <div class="riskGroup compactGroup">
-              <div class="riskGroupHead muted"><strong>離線</strong><span>{offlineDevices.length}</span></div>
-              {#each offlineDevices.slice(0, 3) as device}
+            <details open class="riskGroup compactGroup">
+              <summary class="riskGroupHead muted"><strong>離線</strong><span>{offlineDevices.length}</span></summary>
+              {#each offlineDevices as device}
                 <a class="riskItem muted" href={`/devices/${encodeURIComponent(device.deviceId)}`}>
                   <span>Offline</span>
                   <strong>{deviceTitle(device)}</strong>
                   <small>{unitOf(device)} / {fmtTime(device.updatedAt)}</small>
                 </a>
               {/each}
-            </div>
+            </details>
           {/if}
         </div>
       {/if}
@@ -577,6 +588,7 @@
       <div class="panelHeader compact">
         <div>
           <h2>AI 建議</h2>
+            {#if data.user.is_admin}<a href="/settings">AI 設定</a>{/if}
           <p>{aiPanelMeta(aiRecommendation)}</p>
         </div>
         {#if data.user.is_admin}
@@ -646,6 +658,10 @@
           {#if aiRecommendation.globalSummary || aiRecommendation.reasoningSummary}
             <p class="modalLead">{aiRecommendation.globalSummary || aiRecommendation.reasoningSummary}</p>
           {/if}
+          <section class="aiAction" aria-labelledby="ai-action-title">
+            <h3 id="ai-action-title">建議動作</h3>
+            <p>{aiRecommendation.recommendedAction || aiRecommendation.teamContext?.operatorRecommendation}</p>
+          </section>
           {#if aiRecommendation.teamContext}
             <div class="aiTeamCard">
               <div class="aiTeamHead"><span>鎖定隊伍</span><strong>{aiRecommendation.teamContext.name}</strong></div>
@@ -654,17 +670,15 @@
                 <div><b>生理</b><span>{aiRecommendation.teamContext.physiologySummary}</span></div>
                 <div><b>地形</b><span>{aiRecommendation.teamContext.terrainSummary}</span></div>
               </div>
-              <p class="aiOperator">{aiRecommendation.teamContext.operatorRecommendation}</p>
             </div>
           {/if}
           {#if aiRecommendation.message}
-            <div class="aiMessage"><span>{aiStatusText(aiRecommendation.status)} / Meshtastic 草稿</span><p>{aiRecommendation.message}</p></div>
+            <div class="aiMessage"><span>{aiRecommendation.delivery ? 'Meshtastic 私訊草稿' : 'Meshtastic 草稿'}</span><p>{aiRecommendation.message}</p><small>{deliveryText(aiRecommendation.delivery)}</small></div>
           {/if}
           {#if aiRecommendation.targetAreas.length > 0}
             <div class="aiAreaList">{#each aiRecommendation.targetAreas as area}<span>{area}</span>{/each}</div>
           {/if}
           <div class="aiDetails">
-            <div><b>建議動作</b><p>{aiRecommendation.recommendedAction}</p></div>
             {#if aiRecommendation.teamContext?.movementMeters != null}
               <div><b>位移檢查</b><p>最近 {aiRecommendation.teamContext.movementWindowMinutes ?? 30} 分鐘位移約 {aiRecommendation.teamContext.movementMeters}m。</p></div>
             {/if}
@@ -952,6 +966,8 @@
 
   .mapControls{
     display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
     align-items: center;
     gap: 8px;
   }
@@ -1019,6 +1035,24 @@
     border-right: 5px solid transparent;
     border-bottom: 9px solid var(--red);
   }
+
+  .legendDivider{
+    width: 1px;
+    height: 14px;
+    background: rgba(148, 163, 184, 0.28);
+  }
+
+  .hazardSwatch{
+    width: 13px;
+    height: 9px;
+    display: inline-block;
+    border: 1px solid rgba(255, 255, 255, 0.72);
+    border-radius: 2px;
+  }
+
+  .hazardSwatch.rain{ background: #f59e0b; }
+  .hazardSwatch.cold{ background: #06b6d4; }
+  .hazardSwatch.earthquake{ background: #a855f7; }
 
   .mapViewport{
     min-height: 0;
@@ -1222,10 +1256,15 @@
     font-size: 11px;
   }
 
-  .aiOperator{
-    border-top: 1px solid rgba(148, 163, 184, 0.12);
-    padding-top: 7px;
+  .aiAction{
+    border: 1px solid rgba(96, 165, 250, 0.3);
+    border-left: 3px solid #60a5fa;
+    border-radius: 8px;
+    padding: 12px 14px;
+    background: rgba(96, 165, 250, 0.08);
   }
+  .aiAction h3{ margin: 0 0 6px; color: #bfdbfe; font-size: 14px; }
+  .aiAction p{ margin: 0; color: var(--text); font-size: 14px; line-height: 1.65; white-space: pre-line; overflow-wrap: anywhere; }
 
   .aiMessage{
     display: grid;
@@ -1362,7 +1401,11 @@
     gap: 6px;
   }
 
+  .riskGroup > .riskItem{ margin-top: 6px; }
   .riskGroupHead{
+    cursor: pointer;
+    list-style: none;
+    border: 1px solid transparent;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
@@ -1375,6 +1418,11 @@
     font-size: 12px;
   }
 
+  .riskGroupHead::-webkit-details-marker{ display: none; }
+  .riskGroupHead strong::before{ content: "▸"; display: inline-block; width: 18px; }
+  .riskGroup[open] > .riskGroupHead strong::before{ content: "▾"; }
+  .riskGroupHead:hover{ border-color: #64748b; }
+  .riskGroupHead:focus-visible{ outline: 2px solid #38bdf8; outline-offset: 2px; }
   .riskGroupHead span{
     min-width: 24px;
     border-radius: 999px;

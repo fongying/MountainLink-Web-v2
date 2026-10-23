@@ -40,6 +40,8 @@
   }
 
   function toPosition(d: DeviceTelemetry) {
+    if (d.lat == null || d.lon == null) return null;
+    if (d.lat == null || d.lon == null) return null;
     const lat = toNum((d as any).lat);
     const lng = toNum((d as any).lon);
     if (lat == null || lng == null) return null;

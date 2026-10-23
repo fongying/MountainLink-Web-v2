@@ -98,7 +98,7 @@ function summarizeElevation(device: DeviceTelemetry, results: ElevationResult[],
   const centerDiff = Math.round(max - center);
   const trend =
     relief >= 180
-      ? '周邊高差大，行動需保守並留意陡坡與崩塌風險'
+      ? '周邊高差大，行動需保守並確認實際路線；高差不能判定崩塌潛勢'
       : relief >= 80
         ? '周邊有明顯起伏，撤離或接近需確認路線'
         : '周邊高差較小，仍需結合天氣與地面狀況判斷';
