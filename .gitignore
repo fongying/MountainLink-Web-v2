@@ -37,3 +37,6 @@ vite.config.ts.timestamp-*
 
 /data/ai-settings.json
 /data/ai-settings.json.tmp
+
+/.tools/
+/data/geohazards/source/

@@ -5,6 +5,7 @@
   import { connectSse } from '$lib/client/sse';
   import Sparkline from '$lib/components/Sparkline.svelte';
   import { heartRateRange } from '$lib/sparkline';
+  import GeoHazardPanel from '$lib/components/GeoHazardPanel.svelte';
   import DeviceMap2D from '$lib/components/DeviceMap2D.svelte';
 
   const MAX_POINTS = 60;
@@ -231,7 +232,9 @@
           <span>GPS {current.mx2GpsValid ? '有效' : '無效，保留最後有效位置'} · 定位時間 {current.mx2PositionTs ? fmtTime(current.mx2PositionTs) : '尚無有效定位'}</span>
         {/if}
       </div>
+      <GeoHazardPanel deviceId={data.deviceId} positionKey={`${current?.lat},${current?.lon},${current?.mx2PositionTs},${current?.updatedAt}`} />
     </section>
+
 
     <aside class="panel telemetryPanel">
       <div class="panelHeader">

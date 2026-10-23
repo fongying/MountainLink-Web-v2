@@ -1,4 +1,5 @@
-﻿<script lang="ts">
+<script lang="ts">
+  import { installGeohazardControls } from '$lib/client/geohazard-map';
   import { onMount } from 'svelte';
   import type { DeviceTelemetry } from '$lib/types';
   import { importGmapsLibrary } from '$lib/client/gmaps';
@@ -10,6 +11,7 @@
   export let lockView = true;
   export let showTerrain = false;
 
+  let removeGeohazards: (() => void) | undefined;
   let mapEl: HTMLDivElement | null = null;
   let map: google.maps.Map | null = null;
   let marker: google.maps.Marker | null = null;
@@ -112,6 +114,7 @@
       mapTypeId: showTerrain ? 'terrain' : 'roadmap'
     });
 
+    removeGeohazards ??= installGeohazardControls(map);
     applyLockOptions();
 
     marker = new google.maps.Marker({
@@ -157,6 +160,7 @@
 
     return () => {
       disposed = true;
+      removeGeohazards?.();
       marker?.setMap(null);
       marker = null;
       map = null;

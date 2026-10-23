@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { installGeohazardControls } from '$lib/client/geohazard-map';
   import { onMount, createEventDispatcher } from 'svelte';
   import { mount, unmount } from 'svelte';
   import type { DeviceTelemetry } from '$lib/types';
@@ -15,6 +16,7 @@
 
   const dispatch = createEventDispatcher<{ select: { deviceId: string } }>();
 
+  let removeGeohazards: (() => void) | undefined;
   let mapEl: HTMLDivElement | null = null;
   let map: google.maps.Map | null = null;
   let infoOpen = false;
@@ -287,6 +289,7 @@
           mapTypeId: showContours ? 'terrain' : 'roadmap'
         });
 
+        removeGeohazards = installGeohazardControls(map);
         ensureInfoWindow();
         loadBoundaryLayer();
         syncAlertRegions();
@@ -298,6 +301,7 @@
 
     return () => {
       disposed = true;
+      removeGeohazards?.();
 
       for (const marker of markers.values()) marker.setMap(null);
       markers.clear();

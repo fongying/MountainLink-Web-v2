@@ -1,3 +1,5 @@
+import { assessGeohazards, type GeoAssessment } from '$lib/geohazards';
+import { getGeohazardDataset } from '$lib/server/geohazards';
 import { constrainRecommendationSchema } from '$lib/server/ollama-json';
 import { readAiSettings } from '$lib/server/ai-settings';
 ﻿import { createHash, randomUUID } from 'node:crypto';
@@ -71,6 +73,7 @@ type TeamRiskContext = {
   snr?: number;
   physiologicalAbnormalities: string[];
   terrain: TerrainSummary;
+  geohazard: GeoAssessment;
 };
 
 type LlmRecommendation = {
@@ -395,6 +398,13 @@ function buildTerrainEvidence(team?: TeamRiskContext) {
       label: `${team.name} 地形摘要`,
       detail: team.terrain.summary.slice(0, 260),
       severity: team.terrain.status === 'queried' ? 'watch' : 'info'
+    } satisfies AgentEvidence,
+    {
+      id: `geohazard:${team.deviceId}`,
+      source: 'terrain',
+      label: `${team.name} 官方大規模崩塌圖資（${team.geohazard.year ?? '未知'} 年版）`,
+      detail: `${team.geohazard.summary} ${team.geohazard.matches.map(m=>`${m.officialId} ${m.kind} ${m.relation} 距邊界約${m.distanceMeters}m https://data.gov.tw/dataset/${m.dataset}`).join('；')}`.slice(0, 700),
+      severity: 'info'
     } satisfies AgentEvidence
   ];
 }
@@ -438,6 +448,7 @@ async function buildTeamRiskContext(devices: DeviceTelemetry[]) {
       rssi: device.rssi,
       snr: device.snr,
       physiologicalAbnormalities: risk.physiology,
+      geohazard: assessGeohazards(device, getGeohazardDataset()),
       terrain
     };
   });
@@ -486,8 +497,9 @@ async function buildSnapshot(reason: string): Promise<AgentSnapshot> {
 
 function buildSystemPrompt() {
   return [
+    '官方 geohazard 是靜態大規模崩塌圖資空間比對，非即時警戒；僅 status=ok 可描述當前範圍關係。不得將潛勢說成已發生，未命中不等於安全。必須區分 potential 潛勢區與 impact 影響範圍。GPS 精度未知時邊界需確認；不得僅憑高程差判定崩塌。',
     '你是 MountainLink 山域安全指揮中心的受控 AI agent。',
-    '你只能根據 CWA 災害警示、72 小時山區天氣預報、裝置位置、生理資訊與地形摘要提出建議。',
+    '你只能根據 CWA 災害警示、72 小時山區天氣預報、裝置位置、生理資訊、官方崩塌圖資比對與地形摘要提出建議。',
     '請先給全局摘要，再鎖定 teamRiskContext[0] 這支最急迫隊伍提出處置建議。',
     '只能輸出符合 schema 的 JSON object，不要輸出 markdown 或額外文字。',
     'operatorRecommendation/recommendedAction 是給指揮中心管理者看的處置建議。',
@@ -555,6 +567,7 @@ function buildPrompt(snapshot: AgentSnapshot) {
         rssi: team.rssi,
         snr: team.snr,
         physiologicalAbnormalities: team.physiologicalAbnormalities,
+        geohazard: team.geohazard,
         terrain: team.terrain
       })),
       focusDeviceId: snapshot.focusTeam?.deviceId ?? null,
