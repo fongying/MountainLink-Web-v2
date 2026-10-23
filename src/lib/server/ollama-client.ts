@@ -1,3 +1,4 @@
+import { readAiSettings } from '$lib/server/ai-settings';
 import { env } from '$env/dynamic/private';
 
 export type OllamaGenerateOptions = {
@@ -14,15 +15,15 @@ export type OllamaGenerateResult = {
 };
 
 function ollamaBaseUrl() {
-  return (env.OLLAMA_BASE_URL || 'http://10.77.0.10:11434').replace(/\/+$/u, '');
+  return readAiSettings().baseUrl.replace(/\/+$/u, '');
 }
 
 export function ollamaModel() {
-  return env.OLLAMA_MODEL?.trim() || 'gpt-oss:20b';
+  return readAiSettings().model;
 }
 
 export function isOllamaConfigured() {
-  return Boolean((env.OLLAMA_BASE_URL || '').trim());
+  return Boolean(readAiSettings().baseUrl.trim());
 }
 
 function ollamaTimeoutMs() {
@@ -88,6 +89,9 @@ async function requestOllamaGenerate(options: {
         stream: false,
         ...(options.format ? { format: options.format } : {}),
         options: {
+          num_ctx: 4096,
+          num_batch: 64,
+          ...(readAiSettings().cpuOnly ? { num_gpu: 0 } : {}),
           temperature: 0.1,
           top_p: 0.8,
           repeat_penalty: 1.08,

@@ -1,3 +1,4 @@
+import { readAiSettings } from '$lib/server/ai-settings';
 ﻿import { createHash, randomUUID } from 'node:crypto';
 import { env } from '$env/dynamic/private';
 import type {
@@ -233,7 +234,7 @@ function autoDispatchEnabled() {
 }
 
 function aiProvider(): 'ollama' | 'nvidia' {
-  return env.AI_AGENT_PROVIDER === 'nvidia' ? 'nvidia' : 'ollama';
+  return readAiSettings().provider;
 }
 
 function activeModel() {

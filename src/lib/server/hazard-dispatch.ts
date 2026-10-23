@@ -1,3 +1,4 @@
+import { hazardPayloadHash } from '$lib/hazard-identity';
 import { createHash, createHmac } from 'node:crypto';
 import { env } from '$env/dynamic/private';
 import type { AlertItem } from '$lib/types/alerts';
@@ -93,7 +94,7 @@ function dispatchKey(item: AlertItem, payloadHash: string) {
 }
 
 function payloadHash(payload: DispatchPayload) {
-  return createHash('sha1').update(JSON.stringify(payload)).digest('hex');
+  return hazardPayloadHash(payload);
 }
 
 async function hasDispatched(dispatchKeyValue: string) {
@@ -140,7 +141,8 @@ async function postToWebhook(payload: DispatchPayload) {
   const response = await fetch(url, {
     method: 'POST',
     headers,
-    body: rawBody
+    body: rawBody,
+    signal: AbortSignal.timeout(10000)
   });
 
   if (!response.ok) {
@@ -176,7 +178,9 @@ export async function dispatchHazardItems(items: AlertItem[], reason?: string) {
     const key = dispatchKey(item, hash);
     if (await hasDispatched(key)) continue;
 
-    const sent = await postToWebhook(payload);
+    let sent = false;
+    try { sent = await postToWebhook(payload); }
+    catch { console.error('[hazard-dispatch] webhook failed for alert', item.id); continue; }
     if (!sent) continue;
 
     await storeDispatch(key, hash, payload);

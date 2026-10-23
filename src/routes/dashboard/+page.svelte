@@ -524,22 +524,22 @@
       {:else}
         <div class="riskList combinedRiskList">
           {#if sosDevices.length > 0}
-            <div class="riskGroup">
-              <div class="riskGroupHead danger"><strong>SOS</strong><span>{sosDevices.length}</span></div>
-              {#each sosDevices.slice(0, 3) as device}
+            <details open class="riskGroup">
+              <summary class="riskGroupHead danger"><strong>SOS</strong><span>{sosDevices.length}</span></summary>
+              {#each sosDevices as device}
                 <a class="riskItem danger" href={`/devices/${encodeURIComponent(device.deviceId)}`}>
                   <span>SOS</span>
                   <strong>{deviceTitle(device)}</strong>
                   <small>{unitOf(device)} / {device.online ? 'Online' : 'Offline'} / {fmtTime(device.updatedAt)}</small>
                 </a>
               {/each}
-            </div>
+            </details>
           {/if}
 
           {#if highRiskItems.length > 0}
-            <div class="riskGroup">
-              <div class="riskGroupHead critical"><strong>生理異常</strong><span>{highRiskItems.length}</span></div>
-              {#each highRiskItems.slice(0, 4) as item}
+            <details open class="riskGroup">
+              <summary class="riskGroupHead critical"><strong>生理異常</strong><span>{highRiskItems.length}</span></summary>
+              {#each highRiskItems as item}
                 <a class="riskItem critical" href={`/devices/${encodeURIComponent(item.device.deviceId)}`}>
                   <span>{item.abnormalities.length} 項</span>
                   <strong>{deviceTitle(item.device)}</strong>
@@ -547,33 +547,33 @@
                   <em>{item.abnormalities.join('、')}</em>
                 </a>
               {/each}
-            </div>
+            </details>
           {/if}
 
           {#if lowBatteryDevices.length > 0}
-            <div class="riskGroup compactGroup">
-              <div class="riskGroupHead warn"><strong>低電量</strong><span>{lowBatteryDevices.length}</span></div>
-              {#each lowBatteryDevices.slice(0, 3) as device}
+            <details open class="riskGroup compactGroup">
+              <summary class="riskGroupHead warn"><strong>低電量</strong><span>{lowBatteryDevices.length}</span></summary>
+              {#each lowBatteryDevices as device}
                 <a class="riskItem warn" href={`/devices/${encodeURIComponent(device.deviceId)}`}>
                   <span>{batteryText(device)}</span>
                   <strong>{deviceTitle(device)}</strong>
                   <small>{unitOf(device)} / {fmtTime(device.updatedAt)}</small>
                 </a>
               {/each}
-            </div>
+            </details>
           {/if}
 
           {#if offlineDevices.length > 0}
-            <div class="riskGroup compactGroup">
-              <div class="riskGroupHead muted"><strong>離線</strong><span>{offlineDevices.length}</span></div>
-              {#each offlineDevices.slice(0, 3) as device}
+            <details open class="riskGroup compactGroup">
+              <summary class="riskGroupHead muted"><strong>離線</strong><span>{offlineDevices.length}</span></summary>
+              {#each offlineDevices as device}
                 <a class="riskItem muted" href={`/devices/${encodeURIComponent(device.deviceId)}`}>
                   <span>Offline</span>
                   <strong>{deviceTitle(device)}</strong>
                   <small>{unitOf(device)} / {fmtTime(device.updatedAt)}</small>
                 </a>
               {/each}
-            </div>
+            </details>
           {/if}
         </div>
       {/if}
@@ -582,6 +582,7 @@
       <div class="panelHeader compact">
         <div>
           <h2>AI 建議</h2>
+            {#if data.user.is_admin}<a href="/settings">AI 設定</a>{/if}
           <p>{aiPanelMeta(aiRecommendation)}</p>
         </div>
         {#if data.user.is_admin}
@@ -1385,7 +1386,11 @@
     gap: 6px;
   }
 
+  .riskGroup > .riskItem{ margin-top: 6px; }
   .riskGroupHead{
+    cursor: pointer;
+    list-style: none;
+    border: 1px solid transparent;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
@@ -1398,6 +1403,11 @@
     font-size: 12px;
   }
 
+  .riskGroupHead::-webkit-details-marker{ display: none; }
+  .riskGroupHead strong::before{ content: "▸"; display: inline-block; width: 18px; }
+  .riskGroup[open] > .riskGroupHead strong::before{ content: "▾"; }
+  .riskGroupHead:hover{ border-color: #64748b; }
+  .riskGroupHead:focus-visible{ outline: 2px solid #38bdf8; outline-offset: 2px; }
   .riskGroupHead span{
     min-width: 24px;
     border-radius: 999px;
