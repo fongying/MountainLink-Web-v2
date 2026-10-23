@@ -13,6 +13,7 @@
 
   let devices: DeviceTelemetry[] = data.devices;
   let filter: FilterMode = 'all';
+  const filterTitles: Record<FilterMode, string> = { all: '所有裝置', online: '在線裝置', sos: 'SOS 裝置', risk: '風險裝置', offline: '離線裝置' };
   let query = '';
   let sseStatus: 'open' | 'error' | 'connecting' = 'connecting';
 
@@ -51,16 +52,16 @@
     return 'ok';
   }
 
-  function matchesFilter(device: DeviceTelemetry) {
-    if (filter === 'online') return device.online;
-    if (filter === 'sos') return Boolean(device.sos);
-    if (filter === 'risk') return physiologicalAbnormalities(device).length > 0 || (device.battery != null && device.battery <= 20);
-    if (filter === 'offline') return !device.online;
+  function matchesFilter(device: DeviceTelemetry, mode: FilterMode) {
+    if (mode === 'online') return device.online;
+    if (mode === 'sos') return Boolean(device.sos);
+    if (mode === 'risk') return physiologicalAbnormalities(device).length > 0 || (device.battery != null && device.battery <= 20);
+    if (mode === 'offline') return !device.online;
     return true;
   }
 
-  function matchesQuery(device: DeviceTelemetry) {
-    const normalized = query.trim().toLowerCase();
+  function matchesQuery(device: DeviceTelemetry, search: string) {
+    const normalized = search.trim().toLowerCase();
     if (!normalized) return true;
     return [device.deviceId, device.displayName, device.unit, device.sender]
       .filter(Boolean)
@@ -117,7 +118,7 @@
   $: sosCount = devices.filter((device) => device.sos).length;
   $: riskCount = devices.filter((device) => physiologicalAbnormalities(device).length > 0 || (device.battery != null && device.battery <= 20)).length;
   $: offlineCount = devices.filter((device) => !device.online).length;
-  $: filteredDevices = devices.filter((device) => matchesFilter(device) && matchesQuery(device));
+  $: filteredDevices = devices.filter((device) => matchesFilter(device, filter) && matchesQuery(device, query));
   $: latestUpdate = devices.reduce((latest, device) => Math.max(latest, device.updatedAt ?? 0), 0);
 </script>
 
@@ -142,27 +143,27 @@
   </header>
 
   <section class="summaryGrid" aria-label="裝置摘要">
-    <button type="button" class:active={filter === 'all'} onclick={() => (filter = 'all')}>
+    <button type="button" aria-pressed={filter === 'all'} class:active={filter === 'all'} onclick={() => (filter = 'all')}>
       <span>全部</span>
       <strong>{devices.length}</strong>
       <small>裝置總數</small>
     </button>
-    <button type="button" class:active={filter === 'online'} onclick={() => (filter = 'online')}>
+    <button type="button" aria-pressed={filter === 'online'} class:active={filter === 'online'} onclick={() => (filter = 'online')}>
       <span>在線</span>
       <strong>{onlineCount}</strong>
       <small>可接收資料</small>
     </button>
-    <button type="button" class="danger" class:active={filter === 'sos'} onclick={() => (filter = 'sos')}>
+    <button type="button" class="danger" aria-pressed={filter === 'sos'} class:active={filter === 'sos'} onclick={() => (filter = 'sos')}>
       <span>SOS</span>
       <strong>{sosCount}</strong>
       <small>待救援</small>
     </button>
-    <button type="button" class="warn" class:active={filter === 'risk'} onclick={() => (filter = 'risk')}>
+    <button type="button" class="warn" aria-pressed={filter === 'risk'} class:active={filter === 'risk'} onclick={() => (filter = 'risk')}>
       <span>風險</span>
       <strong>{riskCount}</strong>
       <small>生理或電量</small>
     </button>
-    <button type="button" class="muted" class:active={filter === 'offline'} onclick={() => (filter = 'offline')}>
+    <button type="button" class="muted" aria-pressed={filter === 'offline'} class:active={filter === 'offline'} onclick={() => (filter = 'offline')}>
       <span>離線</span>
       <strong>{offlineCount}</strong>
       <small>待確認</small>
@@ -172,8 +173,8 @@
   <section class="listPanel">
     <div class="panelToolbar">
       <div>
-        <h2>所有裝置</h2>
-        <p>{filteredDevices.length} 筆符合條件</p>
+        <h2>{filterTitles[filter]}</h2>
+        <p role="status" aria-live="polite">{filteredDevices.length} 筆符合條件</p>
       </div>
       <label class="searchBox">
         <span>搜尋</span>
