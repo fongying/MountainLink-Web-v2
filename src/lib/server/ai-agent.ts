@@ -888,7 +888,7 @@ async function analyze(reason: string) {
       }) : AI_RECOMMENDATION_SCHEMA
     };
     llmResult = await generateChineseRecommendation(async (feedback) => {
-      const localizedRequest = feedback ? { ...request, system: `${request.system}\n${feedback}` } : request;
+      const localizedRequest = feedback ? { ...request, system: `${request.system}\n${feedback}`, prompt: JSON.stringify({ ...JSON.parse(request.prompt), languageCorrection: feedback }) } : request;
       return provider === 'nvidia' ? await generateNvidiaJson(localizedRequest) : await generateOllamaJson(localizedRequest);
     });
   } catch (error) {

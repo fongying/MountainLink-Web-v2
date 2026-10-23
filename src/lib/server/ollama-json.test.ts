@@ -62,3 +62,8 @@ test('empty catalogs allow only empty arrays rather than invalid enums', () => {
  assert.equal(schema.properties.evidenceIds.maxItems,0);
  assert.equal(schema.properties.targetAreas.maxItems,0);
 });
+test('saturated input is rejected; Chinese reminder is last in request',async()=>{
+ await assert.rejects(requestStructuredJson({...opts,system:'請使用繁體中文'},async(_,init)=>{
+   const body=JSON.parse(String(init?.body));assert.match(body.prompt,/不得補造資料。$/);return reply({done:true,prompt_eval_count:8192,response:'{"ok":true}'});
+ }),/上下文上限/);
+});
