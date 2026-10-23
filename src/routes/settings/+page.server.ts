@@ -1,3 +1,4 @@
+import { probeOllama } from '$lib/server/ollama-probe';
 import { fail, redirect } from '@sveltejs/kit';
 import { readAiSettings, listOllamaModels, saveAiSettings } from '$lib/server/ai-settings';
 import type { Actions, PageServerLoad } from './$types';
@@ -15,6 +16,21 @@ export const load: PageServerLoad = async ({ locals }) => {
   catch { return { settings: { ...settings, baseUrl }, models: [], connectionError: '無法連接 Lab Ollama，請確認 Tailscale、服務監聽與連接埠。' }; }
 };
 export const actions: Actions = {
+  test: async ({ locals, request }) => {
+    requireAdmin(locals);
+    const form = await request.formData();
+    const baseUrl = String(form.get('baseUrl') ?? '');
+    const model = String(form.get('model') ?? '');
+    const cpuOnly = form.get('cpuOnly') === 'on';
+    try {
+      const models = await listOllamaModels(baseUrl);
+      if (!models.some(m => m.name === model)) return fail(400, { models, message: '模型不存在，請重新偵測並選擇。' });
+      const testResult = await probeOllama({ baseUrl: baseUrl.replace(/\/+$/u, ''), model, cpuOnly });
+      return { models, testResult };
+    } catch {
+      return fail(400, { message: '模型清單讀取失敗，請確認 Lab VPN 位址、連線與服務。' });
+    }
+  },
   discover: async ({ locals, request }) => {
     requireAdmin(locals);
     const form = await request.formData();
