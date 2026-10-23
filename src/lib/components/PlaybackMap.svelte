@@ -69,7 +69,7 @@
           if(!hasPosition(p)) return;
           const pin=new google.maps.Marker({map,position:{lat:p.lat!,lng:p.lon!},
             title:`${playbackTime(p.ts)}・${playbackStatus(p).label}`,
-            icon:{path:google.maps.SymbolPath.CIRCLE,scale:3,fillColor:'#e2e8f0',fillOpacity:0.9,strokeColor:'#365467',strokeWeight:1}});
+            icon:{path:google.maps.SymbolPath.CIRCLE,scale:2,fillColor:'#a5b8c7',fillOpacity:0.3,strokeColor:'#365467',strokeOpacity:0.35,strokeWeight:0.5}});
           pin.addListener('click',()=>onSelect(i));pins.push(pin);
         });
         currentMarker=new google.maps.Marker({map,zIndex:1000});
