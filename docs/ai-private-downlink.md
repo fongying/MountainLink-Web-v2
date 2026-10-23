@@ -29,3 +29,5 @@ Pi 將回報送到 `mlink/alerts/ack/!c0c31f54`；SQLite 保留最新階段與�
 Pi、Node-RED 與 Web 均已備份並部署；服務恢復 active/running。未帶 ingest 認證的回報 API 回覆 401。向最近有效 MX2M 對照的穎哥 `!f6fcf190` 發送「[測試] Gateway 私訊連線測試，無須採取行動。」；事件 `private-test-1792760603142` 在 Pi SQLite 記錄 `radio_ack`，封包 `831746792`，目的十進位 `4143772048`。此為真實無線電 ACK，不代表手機畫面或人員已讀；測試未廣播，也未建立假 SOS／氣象事件。
 
 正式備份：Pi `/home/pi/meshtastic-getway/backups/ai-private-20261023T130134Z`、Web `/home/ubuntu/mountainlink-backups/ai-private-20261023T130142Z`、Node-RED `/opt/nodered/data/flows.pre-downlink-20261023T130136Z.json`。Web 使用 `/usr/bin/node` 建置。回報驗證另以隔離 SQLite 測試，避免把測試建議塞入正式 AI 報告。
+
+ADB 裝置端限定查詢另外確認 Companion `org.mountainlink.meshcompanion` 收到相同測試文字，訊息通知來自 `Meshtastic Client2`，私訊 shortcut 對應 `!c0c31f54`。因此本次實機證據包含 HTTP 接收、Pi 私訊提交、目的無線電 ACK 及手機 Companion 通知；仍不代表人員已讀。完整訊息資料庫未匯出。
