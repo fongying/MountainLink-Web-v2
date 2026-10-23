@@ -60,7 +60,7 @@
     <section class="mapPanel" aria-label="歷史位置">
       <div class="panelHeading"><div><span class="sectionNumber">01</span><h2>位置回溯</h2></div><span class="historyTag">歷史回放</span></div>
       <div class="mapFrame"><PlaybackMap {frames} {index} onSelect={select} /></div>
-      <div class="mapFoot"><span>{playbackTime(playback.start)} — {playbackTime(playback.end)}</span><span>可點擊地圖上的歷史點</span></div>
+      <div class="mapFoot"><span>{playbackTime(playback.start)} — {playbackTime(playback.end)}</span><span>用下方時間條選擇回放時間</span></div>
     </section>
 
     <aside class="statePanel" aria-label="選取時間的裝置狀態">
@@ -114,7 +114,7 @@
 </section>
 
 <style>
-  .replayPage{max-width:1560px;margin:0 auto;padding:28px 24px 48px;color:#dfedf3;--muted:#90afc0;--line:#253b47;--teal:#20d6bd;--panel:#0a171f;font-family:inherit}
+  .replayPage{background:radial-gradient(800px 280px at 8% 0%,#0c2b364f,transparent 65%),#020617;border-radius:18px;min-height:calc(100vh - 120px);max-width:1560px;margin:0 auto;padding:28px 24px 48px;color:#dfedf3;--muted:#90afc0;--line:#253b47;--teal:#20d6bd;--panel:#0a171f;font-family:"Fira Sans","Noto Sans TC",sans-serif}
   .pageHeader{display:flex;justify-content:space-between;gap:26px;align-items:flex-end;margin-bottom:24px}.back{color:#9fbfce;font-size:13px;text-decoration:none}.back:hover{color:var(--teal)}
   .eyebrow{font-size:10px;letter-spacing:.2em;color:#41d5bf;margin:22px 0 8px;font-weight:700}h1{font-size:clamp(27px,3vw,38px);letter-spacing:-.04em;line-height:1.2;margin:0 0 14px;font-weight:800}
   .identity{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.identity strong{font-size:16px}.identity code{font-size:12px;color:var(--muted)}.rangeBadge,.historyTag{font-size:11px;border:1px solid var(--line);border-radius:30px;color:#b4cbd8;padding:5px 9px;white-space:nowrap}
