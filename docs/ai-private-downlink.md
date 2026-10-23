@@ -23,3 +23,9 @@ Pi 將回報送到 `mlink/alerts/ack/!c0c31f54`；SQLite 保留最新階段與�
 - 型別檢查與正式建置通過。
 - 部署前核對正式來源與 Git 基準一致，Pi 舊佇列沒有 queued/sending 命令，備份原始碼、SQLite 與 Node-RED 流程後依 Pi → Node-RED → Web 順序部署。
 - 還原時使用各主機 `backups/ai-private-*`、VPS `mountainlink-backups/ai-private-*` 及 `/opt/nodered/data/flows.pre-downlink-*`。新資料欄位可保留；先還原舊 Web 下行前，應評估恢復 AI 廣播的影響。
+
+## 2026-10-23 正式驗收
+
+Pi、Node-RED 與 Web 均已備份並部署；服務恢復 active/running。未帶 ingest 認證的回報 API 回覆 401。向最近有效 MX2M 對照的穎哥 `!f6fcf190` 發送「[測試] Gateway 私訊連線測試，無須採取行動。」；事件 `private-test-1792760603142` 在 Pi SQLite 記錄 `radio_ack`，封包 `831746792`，目的十進位 `4143772048`。此為真實無線電 ACK，不代表手機畫面或人員已讀；測試未廣播，也未建立假 SOS／氣象事件。
+
+正式備份：Pi `/home/pi/meshtastic-getway/backups/ai-private-20261023T130134Z`、Web `/home/ubuntu/mountainlink-backups/ai-private-20261023T130142Z`、Node-RED `/opt/nodered/data/flows.pre-downlink-20261023T130136Z.json`。Web 使用 `/usr/bin/node` 建置。回報驗證另以隔離 SQLite 測試，避免把測試建議塞入正式 AI 報告。

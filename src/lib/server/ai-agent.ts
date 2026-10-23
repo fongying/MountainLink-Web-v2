@@ -932,7 +932,7 @@ async function analyze(reason: string) {
     } else if (!dispatch.skipped) {
       recommendation = {
         ...recommendation,
-        status: 'failed',
+        status: dispatch.error?.startsWith('私訊阻擋') ? 'blocked' : 'failed',
         dispatchError: dispatch.error ?? 'dispatch failed'
       };
       await updateDispatchState(recommendation.id, recommendation.status, undefined, recommendation.dispatchError);

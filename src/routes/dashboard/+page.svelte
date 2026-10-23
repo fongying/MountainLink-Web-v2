@@ -673,7 +673,7 @@
             </div>
           {/if}
           {#if aiRecommendation.message}
-            <div class="aiMessage"><span>Meshtastic 私訊草稿</span><p>{aiRecommendation.message}</p><small>{deliveryText(aiRecommendation.delivery)}</small></div>
+            <div class="aiMessage"><span>{aiRecommendation.delivery ? 'Meshtastic 私訊草稿' : 'Meshtastic 草稿'}</span><p>{aiRecommendation.message}</p><small>{deliveryText(aiRecommendation.delivery)}</small></div>
           {/if}
           {#if aiRecommendation.targetAreas.length > 0}
             <div class="aiAreaList">{#each aiRecommendation.targetAreas as area}<span>{area}</span>{/each}</div>
