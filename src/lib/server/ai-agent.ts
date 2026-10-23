@@ -1,3 +1,4 @@
+import { generateChineseRecommendation, AiLanguageError } from '$lib/ai-language';
 import { filterAiDevices, AI_DEVICE_MAX_AGE_DAYS } from '$lib/ai-device-freshness';
 import { validateGeohazardClaims } from '$lib/geohazard-validation';
 import { assessGeohazards, type GeoAssessment } from '$lib/geohazards';
@@ -501,6 +502,7 @@ function buildSystemPrompt() {
   return [
     '官方 geohazard 是靜態大規模崩塌圖資空間比對，非即時警戒；僅 status=ok 可描述當前範圍關係。不得將潛勢說成已發生，未命中不等於安全。必須區分 potential 潛勢區與 impact 影響範圍。GPS 精度未知時邊界需確認；不得僅憑高程差判定崩塌。',
     '裝置資料只包含最近21天內更新的紀錄；未提供的歷史裝置不可自行補入、計數或當作目前SOS。',
+    '輸出語言固定為臺灣繁體中文（zh-TW）。title、globalSummary、teamSituationSummary、physiologySummary、terrainSummary、operatorRecommendation、recommendedAction、reasoningSummary、message、meshtasticDraft等所有敘述值都必須使用繁體中文，禁止英文段落與簡體中文。JSON欄位名稱、列舉值、裝置ID、證據ID、單位與專有名詞保留原文。',
     '你是 MountainLink 山域安全指揮中心的受控 AI agent。',
     '你只能根據 CWA 災害警示、72 小時山區天氣預報、裝置位置、生理資訊、官方崩塌圖資比對與地形摘要提出建議。',
     '請先給全局摘要，再鎖定 teamRiskContext[0] 這支最急迫隊伍提出處置建議。',
@@ -544,6 +546,7 @@ function buildPrompt(snapshot: AgentSnapshot) {
     {
       task: '產生全局摘要，並針對 teamRiskContext[0] 這支最急迫隊伍給出操作建議。',
       outputRules: {
+        narrativeLanguage: 'zh-TW',
         deviceMaxAgeDays: AI_DEVICE_MAX_AGE_DAYS,
         sendOnlyWhenEvidenceSupportsWarningOrCritical: true,
         maxMessageCharacters: 180,
@@ -884,12 +887,15 @@ async function analyze(reason: string) {
         targetAreas: MOUNTAIN_FORECAST_LOCATIONS.map(area => `${area.county}${area.town}`)
       }) : AI_RECOMMENDATION_SCHEMA
     };
-    llmResult = provider === 'nvidia' ? await generateNvidiaJson(request) : await generateOllamaJson(request);
+    llmResult = await generateChineseRecommendation(async (feedback) => {
+      const localizedRequest = feedback ? { ...request, system: `${request.system}\n${feedback}` } : request;
+      return provider === 'nvidia' ? await generateNvidiaJson(localizedRequest) : await generateOllamaJson(localizedRequest);
+    });
   } catch (error) {
     const failed = syntheticRecommendation(
       'failed',
-      'AI 分析失敗',
-      provider === 'nvidia' ? 'NVIDIA API 回應失敗，無法產生分析。' : 'Ollama 回應失敗，無法產生分析。',
+      error instanceof AiLanguageError ? 'AI 回覆語言不符' : 'AI 分析失敗',
+      error instanceof AiLanguageError ? 'AI 重試後仍未使用繁體中文，本次報告未發布或發送。' : provider === 'nvidia' ? 'NVIDIA API 回應失敗，無法產生分析。' : 'Ollama 回應失敗，無法產生分析。',
       error instanceof Error ? error.message : `unknown ${provider} error`
     );
     await storeRecommendation(failed);
