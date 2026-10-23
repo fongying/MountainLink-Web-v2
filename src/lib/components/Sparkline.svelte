@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { finiteSegments } from '$lib/sparkline';
+  import { finiteSegments, samplePosition, nearestSample } from '$lib/sparkline';
   export let values: number[] = [];
   export let times: number[] = []; // 與 values 等長的 epoch ms
   export let width = 320;
@@ -34,7 +34,7 @@
   $: span = Math.max(1e-9, vMax - vMin);
 
   function xAt(i: number) {
-    return padX + (i * (width - padX * 2)) / Math.max(1, values.length - 1);
+    return padX + samplePosition(i, times, values.length) * (width - padX * 2);
   }
   function yAt(v: number) {
     return padTop + (1 - (v - vMin) / span) * plotH;
@@ -94,10 +94,9 @@
   function pickIndexFromClientX(clientX: number, svgEl: SVGSVGElement) {
     if (values.length === 0) return null;
     const rect = svgEl.getBoundingClientRect();
-    const x = clientX - rect.left; // 0..width (視覺座標)
+    const x = (clientX - rect.left) * width / rect.width;
     const ratio = (x - padX) / (width - padX * 2);
-    const i = Math.round(ratio * (values.length - 1));
-    return Math.max(0, Math.min(values.length - 1, i));
+    return nearestSample(Math.max(0, Math.min(1, ratio)), times, values.length);
   }
 
   function onMoveRect(e: MouseEvent) {

@@ -20,3 +20,20 @@ export function heartRateRange(values: number[]) {
   const max = Math.max(min + 30, Math.ceil((middle + span / 2) / 5) * 5);
   return { min, max };
 }
+export function samplePosition(index: number, times: number[], count: number) {
+  const first = times[0], last = times[times.length - 1];
+  if (times.length === count && Number.isFinite(first) && Number.isFinite(last)
+      && last > first && Number.isFinite(times[index])) {
+    return Math.max(0, Math.min(1, (times[index] - first) / (last - first)));
+  }
+  return index / Math.max(1, count - 1);
+}
+
+export function nearestSample(position: number, times: number[], count: number) {
+  let nearest = 0, distance = Infinity;
+  for (let i = 0; i < count; i++) {
+    const next = Math.abs(samplePosition(i, times, count) - position);
+    if (next < distance) { nearest = i; distance = next; }
+  }
+  return count ? nearest : null;
+}

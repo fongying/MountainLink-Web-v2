@@ -1,6 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { finiteSegments, heartRateRange } from './sparkline.ts';
+import { finiteSegments, heartRateRange, samplePosition, nearestSample } from './sparkline.ts';
+
+test('irregular samples and hover use the same real time scale as the axis', () => {
+  const times = [1000, 2000, 11000];
+  assert.equal(samplePosition(1, times, 3), 0.1);
+  assert.equal(samplePosition(2, times, 3), 1);
+  assert.equal(nearestSample(0.12, times, 3), 1);
+  assert.equal(nearestSample(0.9, times, 3), 2);
+  assert.equal(nearestSample(0, [], 0), null);
+});
 
 test('heart rate bounds expand with data and do not exaggerate flat readings', () => {
   assert.deepEqual(heartRateRange([72, 76, NaN]), { min: 55, max: 90 });

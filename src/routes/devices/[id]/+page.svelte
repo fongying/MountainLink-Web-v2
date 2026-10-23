@@ -63,20 +63,14 @@
     const sliced = history.length > MAX_POINTS ? history.slice(-MAX_POINTS) : history;
     timeSeries = sliced.map((r) => r.ts);
 
-    let lastHr: number | null = null;
-    let lastBat: number | null = null;
     hrSeries = [];
     batSeries = [];
 
     for (const row of sliced) {
-      if (row.hr != null) lastHr = row.hr;
-      if (row.mx2BatteryRaw != null && row.mx2BatteryRaw > 100) lastBat = null;
-      else if (row.battery != null) lastBat = row.battery;
-      hrSeries.push(lastHr ?? NaN);
-      batSeries.push(lastBat ?? NaN);
+      hrSeries.push(row.hr ?? NaN);
+      batSeries.push(row.mx2BatteryRaw != null && row.mx2BatteryRaw > 100 ? NaN : row.battery ?? NaN);
     }
 
-    hrSeries = backfillNaN(hrSeries, current?.hr ?? 60);
   }
 
   initFromHistory(data.history);
@@ -132,18 +126,16 @@
 
     current = { ...current, ...dev };
     const t = dev.updatedAt ?? Date.now();
+    if (timeSeries[timeSeries.length - 1] === t) return;
     timeSeries.push(t);
     trimTail(timeSeries);
 
-    const prevHr = hrSeries.length ? hrSeries[hrSeries.length - 1] : NaN;
-    const prevBat = batSeries.length ? batSeries[batSeries.length - 1] : NaN;
-    const nextHr = dev.hr != null ? dev.hr : prevHr;
-    const nextBat = dev.mx2BatteryRaw != null && dev.mx2BatteryRaw > 100 ? NaN : dev.battery != null ? dev.battery : prevBat;
+    const nextHr = dev.hr ?? NaN;
+    const nextBat = dev.mx2BatteryRaw != null && dev.mx2BatteryRaw > 100 ? NaN : dev.battery ?? NaN;
 
     hrSeries.push(nextHr);
     batSeries.push(nextBat);
 
-    if (Number.isFinite(nextHr)) hrSeries = fillAllNaN(hrSeries, nextHr);
 
     trimTail(hrSeries);
     trimTail(batSeries);
