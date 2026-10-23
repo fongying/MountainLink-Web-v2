@@ -202,6 +202,7 @@
       </div>
     </div>
     <div class="headerActions">
+      <a href={`/devices/${encodeURIComponent(data.deviceId)}/playback`}>歷史軌跡回放</a>
       <a href="/devices">裝置列表</a>
       <a href="/dashboard">回監控中心</a>
       {#if data.user?.is_admin}
