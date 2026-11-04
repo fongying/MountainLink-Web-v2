@@ -6,7 +6,7 @@ try:
  from meshtastic.protobuf import atak_pb2
 except ImportError:atak_pb2=None
 class SosTests(unittest.TestCase):
- def record(self,text='SOS HELP id=1ba59c04 HR=103 GPS=23.57487,119.58240 ev=f909c452',**edit):
+ def record(self,text='SOS HELP id=1ba59c04 HR=100 GPS=25.00000,121.00000 ev=f909c452',**edit):
   return dict({'from':'!f6fcf190','to':'^all','packet_id':123,'decoded_portnum':'TEXT_MESSAGE_APP','payload_bytes':base64.b64encode(text.encode()).decode(),'pi_receive_time':dt.datetime.now(dt.timezone.utc).isoformat()},**edit)
  def test_native_and_validation(self):
   self.assertEqual(sos_message(self.record(),0)['node_id'],'1ba59c04')

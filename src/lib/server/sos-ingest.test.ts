@@ -10,7 +10,7 @@ await run('CREATE TABLE device_state(device_id TEXT PRIMARY KEY,updated_at INTEG
 await run('CREATE TABLE telemetry_history(device_id TEXT,ts INTEGER,sos INTEGER,recv_ts TEXT,sender TEXT,raw_text TEXT,raw_json TEXT)');
 const now=Date.now();await run('INSERT INTO mx2_samples VALUES(?,?,?,?,?)',['1ba59c04','f6fcf190','real',now-1000,now-1000]);
 await run('INSERT INTO device_state VALUES(?,?,0,88,91,23.5,NULL)',['1ba59c04',now-1000]);
-const body=(edit:any={})=>{const p={node_id:'1ba59c04',source_node:'f6fcf190',gateway_node:'!c0c31f54',packet_id:123,event_token:'f909c452',data_source:'real',received_at:now,text:'SOS HELP id=1ba59c04 HR=103 GPS=23.57487,119.58240 ev=f909c452',...edit};return {...p,key:createHash('sha256').update(`${p.source_node}:${p.packet_id}:${p.text}:${Math.floor(p.received_at/86400000)}`).digest('hex')}};
+const body=(edit:any={})=>{const p={node_id:'1ba59c04',source_node:'f6fcf190',gateway_node:'!c0c31f54',packet_id:123,event_token:'f909c452',data_source:'real',received_at:now,text:'SOS HELP id=1ba59c04 HR=100 GPS=25.00000,121.00000 ev=f909c452',...edit};return {...p,key:createHash('sha256').update(`${p.source_node}:${p.packet_id}:${p.text}:${Math.floor(p.received_at/86400000)}`).digest('hex')}};
 const store=createSosStore('',db);const first=body();assert.equal((await store.ingest(first,now)).applied,true);
 assert.equal((await store.ingest(first,now)).status,'existing');
 const state=await get('select * from device_state');assert.equal(state.sos,1);assert.equal(state.hr,88);assert.equal(state.battery,91);assert.equal(state.lat,23.5);
