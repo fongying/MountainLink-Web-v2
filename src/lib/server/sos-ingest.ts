@@ -32,9 +32,9 @@ export function createSosStore(path='data/app.db', supplied?:sqlite3.Database){
    const rows=await new Promise<any[]>((r,j)=>db.all('SELECT node_id,data_source,sample_ts,received_at FROM mx2_samples WHERE source_node=? AND received_at<=? AND sample_ts<=? ORDER BY sample_ts DESC,received_at DESC LIMIT 2',[p.source_node,p.received_at,p.received_at+60000],(e,v)=>e?j(e):r(v)));
    const mapping=rows[0];const prior=await get("SELECT 1 FROM sos_broadcast_receipts WHERE event_id=? AND json_extract(payload_json,'$.data_source')='real' LIMIT 1",[event]);
    const conflict=rows[1]&&rows[1].sample_ts===mapping?.sample_ts&&rows[1].node_id!==mapping?.node_id;
-   // Initial SOS requires fresh real MX2 identity. The same ongoing SOS can continue while auto-send is paused.
+   // Initial SOS requires a real MX2 identity from the last 24 hours. The same ongoing SOS can continue while auto-send is paused.
    const matched=mapping&&mapping.node_id===p.node_id&&mapping.data_source==='real'&&!conflict
-    &&(prior||(p.received_at-mapping.sample_ts<600000&&p.received_at-mapping.received_at<600000));
+    &&(prior||(p.received_at-mapping.sample_ts<86400000&&p.received_at-mapping.received_at<86400000));
    if(parsed.source==='real'&&!matched)throw new SosError('SOS identity unresolved; keep queued for review',409);
    const applied=parsed.source==='real'&&now-p.received_at<600000&&!/^NT-DEMO-/i.test(p.node_id);
    await run('INSERT INTO sos_broadcast_receipts VALUES(?,?,?,?,?,?,?,?,?)',[p.key,event,p.source_node,p.node_id,p.packet_id,p.received_at,now,Number(applied),JSON.stringify(p)]);

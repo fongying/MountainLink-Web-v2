@@ -17,9 +17,10 @@ const state=await get('select * from device_state');assert.equal(state.sos,1);as
 assert.equal((await get('select count(*) n from telemetry_history')).n,1);
 assert.equal((await store.ingest(body({packet_id:124,received_at:now+1200000}),now+1200000)).applied,true);
 await assert.rejects(store.ingest(body({packet_id:125,node_id:'other'}),now));
+assert.equal((await store.ingest(body({packet_id:129,event_token:'cccccccc',text:'SOS HELP id=1ba59c04 ev=cccccccc',received_at:now+1200000}),now+1200000)).applied,true);
 await run('INSERT INTO mx2_samples VALUES(?,?,?,?,?)',['new-owner','f6fcf190','real',now+1500000,now+1500000]);
 await assert.rejects(store.ingest(body({packet_id:126,received_at:now+1501000}),now+1501000),/identity/);
 const mock=body({packet_id:127,text:'SOS HELP id=1ba59c04 MOCK ev=aaaaaaaa',event_token:'aaaaaaaa',data_source:'mock'});assert.equal((await store.ingest(mock,now)).applied,false);
 const stale=body({packet_id:128,event_token:'bbbbbbbb',text:'SOS HELP id=1ba59c04 ev=bbbbbbbb'});assert.equal((await store.ingest(stale,now+86400000)).applied,false);
-assert.equal((await get('select count(*) n from telemetry_history')).n,2);
+assert.equal((await get('select count(*) n from telemetry_history')).n,3);
 await store.close();console.log('SOS_TESTS_PASSED: identity, dedupe, ongoing SOS, stale/mock isolation, owner change, telemetry preservation');
