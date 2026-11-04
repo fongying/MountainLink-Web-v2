@@ -62,9 +62,12 @@ def private_message(record, start_ms):
 
 
 class ChatUplink:
+    database_name = "private_chat_upload.sqlite3"
+    extract = staticmethod(private_message)
+
     def __init__(self, root):
         self.root = Path(root)
-        self.db = sqlite3.connect(self.root / 'private_chat_upload.sqlite3')
+        self.db = sqlite3.connect(self.root / self.database_name)
         self.db.row_factory = sqlite3.Row
         self.db.executescript('''PRAGMA journal_mode=WAL;
           CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value INTEGER);
@@ -93,7 +96,7 @@ class ChatUplink:
                     if not line or not line.endswith(b'\n'):
                         break
                     try:
-                        message = private_message(json.loads(line), self.start_ms)
+                        message = self.extract(json.loads(line), self.start_ms)
                         if message:
                             self.db.execute('INSERT OR IGNORE INTO messages(key,body,created) VALUES(?,?,?)',
                                             (message['key'], json.dumps(message, ensure_ascii=False), time.time()))

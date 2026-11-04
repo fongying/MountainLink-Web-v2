@@ -198,6 +198,14 @@ def main():
     except Exception as error:
         LOG.warning("Private chat disabled: %s", type(error).__name__)
 
+    sos = None
+    try:
+        from sos_upload import SosUplink
+        sos_url = chat_endpoint(url).replace("/api/chat/ingest", "/api/ingest/sos")
+        sos = SosUplink(root)
+    except Exception as error:
+        LOG.warning("SOS uplink disabled: %s", type(error).__name__)
+
     def post_to(target, body):
         request = urllib.request.Request(target, data=canonical(body).encode(), method="POST",
             headers={"Content-Type": "application/json", "X-MLINK-MX2-KEY": key})
@@ -224,6 +232,12 @@ def main():
                 chat.send(lambda body: post_to(chat_url, body))
         except Exception as error:
             LOG.warning("Private chat upload iteration failed: %s", type(error).__name__)
+        try:
+            if sos:
+                sos.follow()
+                sos.send(lambda body: post_to(sos_url, body))
+        except Exception as error:
+            LOG.warning("SOS upload iteration failed: %s", type(error).__name__)
         time.sleep(2)
 
 
