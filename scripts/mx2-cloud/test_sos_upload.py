@@ -7,7 +7,7 @@ try:
 except ImportError:atak_pb2=None
 class SosTests(unittest.TestCase):
  def record(self,text='SOS HELP id=1ba59c04 HR=103 GPS=23.57487,119.58240 ev=f909c452',**edit):
-  return dict({'from':'!f6fcf190','to':'!ffffffff','packet_id':123,'decoded_portnum':'TEXT_MESSAGE_APP','payload_bytes':base64.b64encode(text.encode()).decode(),'pi_receive_time':dt.datetime.now(dt.timezone.utc).isoformat()},**edit)
+  return dict({'from':'!f6fcf190','to':'^all','packet_id':123,'decoded_portnum':'TEXT_MESSAGE_APP','payload_bytes':base64.b64encode(text.encode()).decode(),'pi_receive_time':dt.datetime.now(dt.timezone.utc).isoformat()},**edit)
  def test_native_and_validation(self):
   self.assertEqual(sos_message(self.record(),0)['node_id'],'1ba59c04')
   for text in ['SOS HELP id=x HR=999 ev=f909c452','SOS HELP id=x GPS=99.00000,119.00000 ev=f909c452','hello SOS HELP id=x ev=f909c452','SOS OFF id=x ev=f909c452']:

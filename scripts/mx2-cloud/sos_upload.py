@@ -24,7 +24,7 @@ def sos_message(record,start_ms):
             expected='N'+fields['node_id']
             if tak.contact.callsign!=expected or not tak.contact.device_callsign.startswith(expected+'|'):return None
         else:text=raw.decode('utf-8');fields=parse_help(text)
-        source=node_num(record['from']);destination=node_num(record['to'])
+        source=node_num(record['from']);destination=0xffffffff if record.get('to')=='^all' else node_num(record['to'])
         if source in (0,0xffffffff,0xc0c31f54) or destination not in (0xffffffff,0xc0c31f54):return None
         stamp=dt.datetime.fromisoformat(record['pi_receive_time'].replace('Z','+00:00'))
         if stamp.tzinfo is None:return None
