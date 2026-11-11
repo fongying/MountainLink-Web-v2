@@ -17,11 +17,9 @@ async function tick(reason: string) {
       reason
     });
 
-    if (!changed) return;
-
-    broadcastSse('hazard_update', snapshot);
+    if (changed) broadcastSse('hazard_update', snapshot);
     await dispatchHazardItems(snapshot.items, reason);
-    if (shouldRunAiAgentAutomatically()) {
+    if (changed && shouldRunAiAgentAutomatically()) {
       void runAiRecommendationAnalysis({ reason: `hazard_${reason}`, broadcast: true });
     }
   } catch (error) {

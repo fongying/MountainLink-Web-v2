@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { installGeohazardControls } from '$lib/client/geohazard-map';
   import { onMount, createEventDispatcher } from 'svelte';
   import { mount, unmount } from 'svelte';
   import type { DeviceTelemetry } from '$lib/types';
@@ -15,6 +16,8 @@
 
   const dispatch = createEventDispatcher<{ select: { deviceId: string } }>();
 
+  export let showGeohazards = false;
+  let removeGeohazards: ReturnType<typeof installGeohazardControls> | undefined;
   let mapEl: HTMLDivElement | null = null;
   let map: google.maps.Map | null = null;
   let infoOpen = false;
@@ -48,6 +51,8 @@
   }
 
   function hasLatLon(d: DeviceTelemetry) {
+    if (d.lat == null || d.lon == null) return false;
+    if (d.lat == null || d.lon == null) return false;
     const lat = typeof d.lat === 'number' ? d.lat : Number(d.lat);
     const lon = typeof d.lon === 'number' ? d.lon : Number(d.lon);
     return Number.isFinite(lat) && Number.isFinite(lon);
@@ -175,11 +180,17 @@
     }
   }
 
-  function alertRegionStyle(severity: MapAlertRegion['severity']) {
-    if (severity === 'critical') return { fill: '#ef4444', stroke: '#fecaca', opacity: 0.25 };
-    if (severity === 'warning') return { fill: '#f59e0b', stroke: '#fde68a', opacity: 0.22 };
-    if (severity === 'watch') return { fill: '#38bdf8', stroke: '#bae6fd', opacity: 0.18 };
-    return { fill: '#94a3b8', stroke: '#e2e8f0', opacity: 0.12 };
+  function alertRegionStyle(region: MapAlertRegion) {
+    const palette =
+      region.type === 'earthquake'
+        ? { fill: '#a855f7', stroke: '#e9d5ff' }
+        : region.type === 'cold'
+          ? { fill: '#06b6d4', stroke: '#cffafe' }
+          : { fill: '#f59e0b', stroke: '#fef3c7' };
+    const opacity =
+      region.severity === 'critical' ? 0.34 : region.severity === 'warning' ? 0.28 : region.severity === 'watch' ? 0.22 : 0.15;
+    const strokeWeight = region.severity === 'critical' ? 3.2 : region.severity === 'warning' ? 2.6 : 2;
+    return { ...palette, opacity, strokeWeight };
   }
 
   function alertRegionLabel(severity: MapAlertRegion['severity']) {
@@ -203,7 +214,7 @@
         };
       }
 
-      const style = alertRegionStyle(region.severity);
+      const style = alertRegionStyle(region);
       return {
         visible: true,
         clickable: true,
@@ -211,7 +222,7 @@
         fillOpacity: style.opacity,
         strokeColor: style.stroke,
         strokeOpacity: 0.92,
-        strokeWeight: 2,
+        strokeWeight: style.strokeWeight,
         zIndex: 2
       };
     });
@@ -231,7 +242,7 @@
         const region = alertRegions.find((item) => item.areaKey === areaKey);
         if (!areaKey || !region || !map) return;
 
-        const style = alertRegionStyle(region.severity);
+        const style = alertRegionStyle(region);
         map.data.overrideStyle(event.feature, {
           fillOpacity: Math.min(style.opacity + 0.14, 0.42),
           strokeWeight: 3,
@@ -279,6 +290,7 @@
           mapTypeId: showContours ? 'terrain' : 'roadmap'
         });
 
+        removeGeohazards = installGeohazardControls(map, showGeohazards);
         ensureInfoWindow();
         loadBoundaryLayer();
         syncAlertRegions();
@@ -290,6 +302,7 @@
 
     return () => {
       disposed = true;
+      removeGeohazards?.();
 
       for (const marker of markers.values()) marker.setMap(null);
       markers.clear();
@@ -320,6 +333,7 @@
   $: if (map) {
     map.setMapTypeId(showContours ? 'terrain' : 'roadmap');
   }
+  $: removeGeohazards?.setVisible(showGeohazards);
 </script>
 
 <div class="mapShell">

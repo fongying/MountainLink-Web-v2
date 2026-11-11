@@ -21,6 +21,7 @@
       {/if}
       {#if data.user?.is_admin}
         <a href="/admin" class="navLink">管理者入口</a>
+        <a href="/settings" class="navLink">AI 設定</a>
         <a href="/register" class="navLink">註冊帳號</a>
       {/if}
     </div>

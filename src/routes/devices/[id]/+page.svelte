@@ -1,14 +1,18 @@
 <script lang="ts">
+  import { formatBattery, powerStatus } from '$lib/battery';
   import { onMount } from 'svelte';
   import type { DeviceTelemetry, MLinkSseEvent } from '$lib/types';
   import { connectSse } from '$lib/client/sse';
   import Sparkline from '$lib/components/Sparkline.svelte';
+  import { heartRateRange } from '$lib/sparkline';
+  import GeoHazardPanel from '$lib/components/GeoHazardPanel.svelte';
   import DeviceMap2D from '$lib/components/DeviceMap2D.svelte';
 
   const MAX_POINTS = 60;
   const MAX_LOGS = 20;
 
   type HistoryRow = {
+    mx2BatteryRaw?: number | null;
     ts: number;
     hr: number | null;
     battery: number | null;
@@ -28,10 +32,12 @@
     history: HistoryRow[];
   };
 
+  let showGeohazards = false;
   let sseStatus: 'open' | 'error' | 'connecting' = 'connecting';
   let current: DeviceTelemetry | null = data.device ?? null;
   let timeSeries: number[] = [];
   let hrSeries: number[] = [];
+  $: hrRange = heartRateRange(hrSeries);
   let batSeries: number[] = [];
   let chartW = 640;
   let logs: string[] = [];
@@ -59,20 +65,14 @@
     const sliced = history.length > MAX_POINTS ? history.slice(-MAX_POINTS) : history;
     timeSeries = sliced.map((r) => r.ts);
 
-    let lastHr: number | null = null;
-    let lastBat: number | null = null;
     hrSeries = [];
     batSeries = [];
 
     for (const row of sliced) {
-      if (row.hr != null) lastHr = row.hr;
-      if (row.battery != null) lastBat = row.battery;
-      hrSeries.push(lastHr ?? NaN);
-      batSeries.push(lastBat ?? NaN);
+      hrSeries.push(row.hr ?? NaN);
+      batSeries.push(row.mx2BatteryRaw != null && row.mx2BatteryRaw > 100 ? NaN : row.battery ?? NaN);
     }
 
-    hrSeries = backfillNaN(hrSeries, current?.hr ?? 60);
-    batSeries = backfillNaN(batSeries, current?.battery ?? 100);
   }
 
   initFromHistory(data.history);
@@ -92,7 +92,7 @@
     if (device.sos) return 'SOS';
     if (!device.online) return '離線';
     if (physiologicalAbnormalities(device).length > 0) return '生理異常';
-    if ((device.battery ?? 0) <= 20) return '低電量';
+    if ((device.battery != null && device.battery <= 20)) return '低電量';
     return '正常';
   }
 
@@ -101,7 +101,7 @@
     if (device.sos) return 'danger';
     if (!device.online) return 'offline';
     if (physiologicalAbnormalities(device).length > 0) return 'risk';
-    if ((device.battery ?? 0) <= 20) return 'warn';
+    if ((device.battery != null && device.battery <= 20)) return 'warn';
     return 'ok';
   }
 
@@ -128,19 +128,16 @@
 
     current = { ...current, ...dev };
     const t = dev.updatedAt ?? Date.now();
+    if (timeSeries[timeSeries.length - 1] === t) return;
     timeSeries.push(t);
     trimTail(timeSeries);
 
-    const prevHr = hrSeries.length ? hrSeries[hrSeries.length - 1] : NaN;
-    const prevBat = batSeries.length ? batSeries[batSeries.length - 1] : NaN;
-    const nextHr = dev.hr != null ? dev.hr : prevHr;
-    const nextBat = dev.battery != null ? dev.battery : prevBat;
+    const nextHr = dev.hr ?? NaN;
+    const nextBat = dev.mx2BatteryRaw != null && dev.mx2BatteryRaw > 100 ? NaN : dev.battery ?? NaN;
 
     hrSeries.push(nextHr);
     batSeries.push(nextBat);
 
-    if (Number.isFinite(nextHr)) hrSeries = fillAllNaN(hrSeries, nextHr);
-    if (Number.isFinite(nextBat)) batSeries = fillAllNaN(batSeries, nextBat);
 
     trimTail(hrSeries);
     trimTail(batSeries);
@@ -159,7 +156,7 @@
       applyTelemetry({
         deviceId: evt.deviceId,
         online: evt.online,
-        battery: current?.battery ?? 0,
+        battery: current?.battery,
         updatedAt: evt.updatedAt
       });
       pushLog(`[online] ${fmtTime(evt.updatedAt)} ${evt.online ? 'Online' : 'Offline'}`);
@@ -205,6 +202,8 @@
       </div>
     </div>
     <div class="headerActions">
+      <a href={`/devices/${encodeURIComponent(data.deviceId)}/chat`}>私訊聊天</a>
+      <a href={`/devices/${encodeURIComponent(data.deviceId)}/playback`}>歷史軌跡回放</a>
       <a href="/devices">裝置列表</a>
       <a href="/dashboard">回監控中心</a>
       {#if data.user?.is_admin}
@@ -220,11 +219,11 @@
           <h2>位置地圖</h2>
           <p>鎖定裝置位置與地形視角</p>
         </div>
-        <span>Zoom 16</span>
+        <label class="geohazardToggle"><input type="checkbox" bind:checked={showGeohazards} /> 崩塌圖資</label>
       </div>
       {#if current || data.device}
         <div class="mapFrame">
-          <DeviceMap2D device={(current ?? data.device) as any} height="100%" zoom={16} lockView={true} showTerrain={true} />
+          <DeviceMap2D device={(current ?? data.device) as any} height="100%" zoom={16} lockView={true} showTerrain={true} {showGeohazards} />
         </div>
       {:else}
         <p class="empty">尚未取得裝置定位資料。</p>
@@ -232,8 +231,13 @@
       <div class="locationBar">
         <b>座標</b>
         <span>{coordinateText(current)}</span>
+        {#if current?.mx2GpsValid !== undefined}
+          <span>GPS {current.mx2GpsValid ? '有效' : '無效，保留最後有效位置'} · 定位時間 {current.mx2PositionTs ? fmtTime(current.mx2PositionTs) : '尚無有效定位'}</span>
+        {/if}
       </div>
+      <GeoHazardPanel deviceId={data.deviceId} positionKey={`${current?.lat},${current?.lon},${current?.mx2PositionTs},${current?.updatedAt}`} />
     </section>
+
 
     <aside class="panel telemetryPanel">
       <div class="panelHeader">
@@ -251,10 +255,11 @@
             <strong>{deviceStatusLabel(current)}</strong>
             <small>{current.online ? 'Online' : 'Offline'}</small>
           </div>
-          <div class={`statusMetric ${(current.battery ?? 0) <= 20 ? 'warn' : 'ok'}`}>
+          <div class={`statusMetric ${(current.battery != null && current.battery <= 20) ? 'warn' : 'ok'}`}>
             <span>電量</span>
-            <strong>{current.battery ?? '—'}%</strong>
-            <small>{current.charging ? '充電中' : '一般供電'}</small>
+            <strong>{formatBattery(current)}</strong>
+            <small>{powerStatus(current)}</small>
+            {#if current.mx2BatteryTs}<small>電源回報 {fmtTime(current.mx2BatteryTs)}</small>{/if}
           </div>
           <div class={`statusMetric ${abnormalities.some((item) => item.includes('心率')) ? 'danger' : 'ok'}`}>
             <span>心率</span>
@@ -328,7 +333,7 @@
       {#if current}
         <div class="chartBlock">
           <div class="chartHeader">
-            <strong>心率</strong>
+            <strong>心率 <small>（顯示範圍 {hrRange.min}–{hrRange.max} bpm）</small></strong>
             <span>{current.hr ?? '—'} bpm</span>
           </div>
           <Sparkline
@@ -336,20 +341,20 @@
             times={timeSeries}
             width={sparkW}
             height={112}
-            min={40}
-            max={180}
+            min={hrRange.min}
+            max={hrRange.max}
             tickEverySeconds={10}
             bands={[
-              { from: 50, to: 60, color: '#22c55e', opacity: 0.12, label: '偏低' },
-              { from: 60, to: 120, color: '#eab308', opacity: 0.12, label: '正常' },
-              { from: 120, to: 160, color: '#ef4444', opacity: 0.12, label: '偏高' }
+              { from: 60, to: 100, color: '#22c55e', opacity: 0.12, label: '設定範圍內' },
+              { from: hrRange.min, to: 60, color: '#eab308', opacity: 0.12, label: '低於設定範圍' },
+              { from: 100, to: hrRange.max, color: '#eab308', opacity: 0.12, label: '高於設定範圍' }
             ]}
           />
         </div>
         <div class="chartBlock">
           <div class="chartHeader">
             <strong>電量</strong>
-            <span>{current.battery ?? '—'}%</span>
+            <span>{formatBattery(current)}</span>
           </div>
           <Sparkline values={batSeries} times={timeSeries} width={sparkW} height={100} min={0} max={100} tickEverySeconds={10} />
         </div>
@@ -380,6 +385,7 @@
 </section>
 
 <style>
+  .geohazardToggle { display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#a6beca;white-space:nowrap; }
   .deviceDetailPage{
     --bg: #020617;
     --panel: #081318;

@@ -135,6 +135,11 @@ db.serialize(() => {
     FOREIGN KEY(recommendation_id) REFERENCES ai_recommendations(id)
   )`);
 
+  addColumnIfMissing('ai_dispatches', 'delivery_stage TEXT');
+  addColumnIfMissing('ai_dispatches', 'delivery_rank INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing('ai_dispatches', 'delivery_packet_id INTEGER');
+  addColumnIfMissing('ai_dispatches', 'delivery_updated_at INTEGER');
+
   db.run(`CREATE TABLE IF NOT EXISTS device_state (
     device_id TEXT PRIMARY KEY,
     updated_at INTEGER NOT NULL,

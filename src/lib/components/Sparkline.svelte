@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { finiteSegments, samplePosition, nearestSample } from '$lib/sparkline';
   export let values: number[] = [];
   export let times: number[] = []; // 與 values 等長的 epoch ms
   export let width = 320;
@@ -27,20 +28,22 @@
   $: padBottom = showTimeAxis ? axisH : 8;
   $: plotH = height - padTop - padBottom;
 
-  $: vMin = min ?? (values.length ? Math.min(...values) : 0);
-  $: vMax = max ?? (values.length ? Math.max(...values) : 1);
+  $: finiteValues = values.filter(Number.isFinite);
+  $: vMin = min ?? (finiteValues.length ? Math.min(...finiteValues) : 0);
+  $: vMax = max ?? (finiteValues.length ? Math.max(...finiteValues) : 1);
   $: span = Math.max(1e-9, vMax - vMin);
 
   function xAt(i: number) {
-    return padX + (i * (width - padX * 2)) / Math.max(1, values.length - 1);
+    return padX + samplePosition(i, times, values.length) * (width - padX * 2);
   }
   function yAt(v: number) {
     return padTop + (1 - (v - vMin) / span) * plotH;
   }
 
-  $: points = values
-    .map((v, i) => `${xAt(i).toFixed(2)},${yAt(v).toFixed(2)}`)
-    .join(' ');
+  $: segments = finiteSegments(values);
+  function pointsFor(segment: { index: number; value: number }[]) {
+    return segment.map(p => `${xAt(p.index).toFixed(2)},${yAt(p.value).toFixed(2)}`).join(' ');
+  }
 
   function fmtTime(ms: number) {
     const d = new Date(ms);
@@ -91,10 +94,9 @@
   function pickIndexFromClientX(clientX: number, svgEl: SVGSVGElement) {
     if (values.length === 0) return null;
     const rect = svgEl.getBoundingClientRect();
-    const x = clientX - rect.left; // 0..width (視覺座標)
+    const x = (clientX - rect.left) * width / rect.width;
     const ratio = (x - padX) / (width - padX * 2);
-    const i = Math.round(ratio * (values.length - 1));
-    return Math.max(0, Math.min(values.length - 1, i));
+    return nearestSample(Math.max(0, Math.min(1, ratio)), times, values.length);
   }
 
   function onMoveRect(e: MouseEvent) {
@@ -110,7 +112,7 @@
   }
 
   $: hover =
-    hoverIndex != null && hoverIndex >= 0 && hoverIndex < values.length
+    hoverIndex != null && hoverIndex >= 0 && hoverIndex < values.length && Number.isFinite(values[hoverIndex])
       ? (() => {
           const v = values[hoverIndex!];
           const t = times?.[hoverIndex!] ?? null;
@@ -156,8 +158,8 @@
   <!-- ✅ 安全區間帶（先畫在折線底下） -->
   {#each bands as b (`${b.from}-${b.to}`)}
     {#if values.length > 0}
-      {@const bandTop = Math.min(yAt(b.from), yAt(b.to))}
-      {@const bandBottom = Math.max(yAt(b.from), yAt(b.to))}
+      {@const bandTop = Math.max(padTop, Math.min(yAt(b.from), yAt(b.to)))}
+      {@const bandBottom = Math.min(padTop + plotH, Math.max(yAt(b.from), yAt(b.to)))}
       <rect
         x={padX}
         y={bandTop}
@@ -187,11 +189,14 @@
   />
 
 
-  {#if values.length >= 2}
-    <polyline fill="none" stroke="#111" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" points={points} />
-  {:else if values.length === 1}
-    <circle cx={width - padX} cy={padTop + plotH / 2} r="3" fill="#111" />
-  {:else}
+  {#each segments as segment}
+    {#if segment.length >= 2}
+      <polyline fill="none" stroke="#111" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" points={pointsFor(segment)} />
+    {:else}
+      <circle cx={xAt(segment[0].index)} cy={yAt(segment[0].value)} r="3" fill="#111" />
+    {/if}
+  {/each}
+  {#if !finiteValues.length}
     <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#888" font-size="12">
       尚無資料
     </text>

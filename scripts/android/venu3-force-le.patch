@@ -1,0 +1,13 @@
+--- a/mesh_service_example/src/main/java/com/meshtastic/android/meshserviceexample/ble/HrPlxBleClient.kt
++++ b/mesh_service_example/src/main/java/com/meshtastic/android/meshserviceexample/ble/HrPlxBleClient.kt
+@@ -102,7 +102,9 @@
+             return
+         }
+         // ?岫?? GATT ??
+-        gatt = device.connectGatt(context, false, gattCallback)
++        // Garmin dual-mode devices must use LE for the heart-rate GATT service.
++        Log.d(TAG, "Connecting heart-rate sensor using TRANSPORT_LE")
++        gatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+     }
+ 
+     // ?琿? BLE ??銝阡??曇?皞?

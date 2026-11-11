@@ -3,12 +3,18 @@ export type DeviceTelemetry = {
   deviceId: string;
   displayName?: string;
   online: boolean;
-  battery: number; // 0~100
+  battery?: number | null; // 0~100
   charging?: boolean;
   hr?: number;
   lat?: number;
   lon?: number;
   alt?: number;
+  mx2BatteryRaw?: number;
+  mx2BatteryTs?: number;
+  mx2GpsValid?: boolean;
+  mx2PositionTs?: number;
+  mx2SampleTs?: number;
+  mx2DataSource?: string;
   updatedAt: number; // epoch ms
   sos?: boolean;
   rssi?: number;
@@ -83,6 +89,7 @@ export type AiRecommendation = {
   generatedAt: string;
   dispatchedAt?: string;
   dispatchError?: string;
+  delivery?: import('./ai-delivery').AiDeliveryState;
 };
 
 export type RainLevel = '超大豪雨' | '大豪雨' | '豪雨' | '大雨';

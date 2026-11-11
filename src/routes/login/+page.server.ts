@@ -5,7 +5,7 @@ import { createSession, SESSION_COOKIE_NAME, verifyUser } from '$lib/server/auth
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 天
 
 export const actions = {
-  default: async ({ request, cookies, url}: any ) => {
+  default: async ({ request, cookies, url }: any) => {
     const form = await request.formData();
     const username = String(form.get('username') ?? '').trim();
     const password = String(form.get('password') ?? '');
@@ -27,7 +27,7 @@ export const actions = {
       path: '/',
       httpOnly: true,
       sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
+      secure: url.protocol === 'https:',
       maxAge: SESSION_TTL_SECONDS // ✅ 直接固定秒數最穩
     });
     const returnTo = url.searchParams.get('returnTo') ?? '/dashboard';
